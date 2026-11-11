@@ -1,0 +1,23 @@
+[Unit]
+Description=News Curator feed backend (knewsd)
+Documentation=https://github.com/infidel/kde-news-curator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/knews-curator/app
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=KNEWS_ACCESS_LOG=1
+ExecStart=/usr/bin/python3 -m knewsd --port 8770 --host 127.0.0.1
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/.local/share/knews-curator -%h/.cache/knews-curator
+
+[Install]
+WantedBy=default.target

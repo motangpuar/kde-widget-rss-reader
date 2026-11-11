@@ -1,29 +1,55 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
-Greenfield. Target: Plasma 6 widget (Inoreader-like 3-pane) + local Python feed daemon
-with readability extraction (Instapaper-style reader) and open-in-browser.
+Shipped v1.0.0: Plasma 6 applet `io.github.infidel.newscurator` + stdlib-only Python daemon
+`knewsd` (SQLite, JSON on 127.0.0.1:8770). Installed and running on the host; widget added to
+the desktop, list/state API traffic confirmed live. Backend 24 unit tests green, all QML
+lint-clean, all five QML components instantiate clean under an offscreen `qml` harness.
 
 ## Active State
-- Repo initialized empty (git), no code yet.
-- Container: qt6-declarative installed (qmllint available).
-- Host: Fedora Kinoite 44 / Plasma 6.7.3 / python3 3.14 / kpackagetool6 / QML at /usr/lib64/qt6/qml.
+- Backend committed (`2d4ee45`); plasmoid/scripts/README committed in the follow-up commit.
+- Host: code at `/home/infidel/.local/share/knews-curator/app/knewsd`, unit
+  `~/.config/systemd/user/knewsd.service`, DB `~/.local/share/knews-curator/curator.db`,
+  image cache `~/.cache/knews-curator/images`, applet under
+  `~/.local/share/plasma/plasmoids/io.github.infidel.newscurator`.
+- Dev loop: `./install.sh` (full reinstall) or `./dev-reload.sh` (applet only + plasmashell
+  restart + QML error grep).
 
 ## Known Blockers / Facts
-- Host is immutable (rpm-ostree) and runs the widget, but code lives in container dir
-  `/home/infidel/distrobox/archfox/Projects/kde-news-curator` which is the SAME path visible
-  on host `$HOME/Projects/kde-news-curator` → install with `distrobox-host-exec`.
-- `distrobox-host-exec` reachable; systemd --user operational (state "degraded").
-- Qt rich-text in QML does not load remote images reliably → reader uses structured blocks
-  (`paragraph runs`/`image`/`list`/`quote`/`code`) + local cached image files, not HTML.
-- QML XHR has no CORS; browser CSRF blocked by custom header `X-Knews-Client: plasma`
-  required on mutating calls + no Access-Control-Allow-* headers.
+- Host immutable (rpm-ostree); Plasma tooling only on host → scripts self re-exec through
+  `distrobox-host-exec`. Project path is identical on both sides.
+- No `qmllint` on host, no `qml` runtime on host. Container has Qt 6.12 (`/usr/lib/qt6/bin/qmllint`,
+  `/usr/lib/qt6/bin/qml`) but no Plasma modules → runtime checks use a stub import tree at
+  `/tmp/qh/imports` (`org.kde.kirigami`, `org.kde.plasma.components` wrappers over QtQuick.Controls).
+- Plasma 6 applet QML is only reloaded by restarting `plasmashell`
+  (`systemctl --user try-restart app-plasmashell@<hash>.service`); `kpackagetool6 --upgrade` alone does nothing.
+- Runtime-only QML errors (property names) are invisible to qmllint when the module is missing;
+  plasmashell logs them as `error when loading applet "<id>" QList(...)`.
+- `PlasmaComponents3.TextField` has no `clearButtonEnabled`. Icon-only buttons use
+  `display: AbstractButton.IconOnly` (QtQuick.Controls) — `PlasmaComponents3.AbstractButton.IconOnly`
+  is not guaranteed to resolve.
+- Properties auto-generate change signals: a `property string view` forbids `signal viewChanged`
+  (use `viewRequested`); same for `port` → `portEdited`.
+- systemd `ReadWritePaths=` fails namespace setup (exit 226) if the path is missing → prefix
+  with `-` and create dirs before start.
+- `systemctl enable --now` does not restart an already-running unit → install.sh uses
+  `enable` + `restart`.
 
 ## Next Steps
-1. backend: config/db → feeds parser → readability → http api + unittest coverage.
-2. plasmoid: metadata, config, 3-pane UI, reader view, add-feed/OPML.
-3. install.sh/uninstall.sh + systemd unit; qmllint + live daemon smoke test.
-4. Add widget to desktop via plasmashell evaluateScript; check journal for QML errors.
+1. Wire the sidebar delete-feed action (removed from main.qml; feeds are deleted from SettingsSheet).
+2. Optional: prefetch preview mark-read on scroll end (currently only on open).
+3. Ask user whether the accidental `POST /api/mark-all` at 18:32:25 (all 15 LWN items → read)
+   should be reverted; no bulk un-read endpoint exists yet.
+4. Consider capping stored `content` HTML per item and pruning old rows (DB growth).
 
 ## Chronological History
-- 2026-11-11: repo created; env mapped; qt6-declarative added to container for qmllint.
+- 2026-11-11: backend (feeds/readability/fetch/db/api) + 24 tests; commit `2d4ee45`.
+- 2026-11-11: QML UI (main, FeedSidebar, ArticleList, ReaderView, AddFeedSheet, SettingsSheet),
+  Api.js, icons, systemd unit, install/uninstall/dev-reload scripts, README.
+- 2026-11-11: fixed QML runtime errors found via plasmashell journal: `clearButtonEnabled`,
+  `PlasmaComponents3.AbstractButton.IconOnly`, duplicate `viewChanged`/`portChanged` signals,
+  stale `onDeleteFeedRequested` on FeedSidebar, missing `blockData` plumbing (Loader).
+- 2026-11-11: fixed unit `ReadWritePaths` (dirs missing → 226/NAMESPACE) and
+  `enable --now` not restarting; added `KNEWS_ACCESS_LOG` request logging.
+- 2026-11-11: offscreen harness (`/tmp/qh`) validated ReaderView blocks, ArticleList,
+  FeedSidebar, SettingsSheet, AddFeedSheet against live Ars Technica article data.

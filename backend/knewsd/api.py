@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +19,7 @@ from .config import DEFAULT_PORT, VERSION
 from .db import Store
 
 CLIENT_HEADER = "x-knews-client"
+ACCESS_LOG = os.environ.get("KNEWS_ACCESS_LOG") == "1"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
@@ -141,7 +144,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- plumbing
     def log_message(self, fmt: str, *args: Any) -> None:  # quieter logs
-        return
+        if ACCESS_LOG:
+            sys.stderr.write("request %s - %s\n" % (self.address_string(), fmt % args))
+            sys.stderr.flush()
 
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").split(":")[0]
