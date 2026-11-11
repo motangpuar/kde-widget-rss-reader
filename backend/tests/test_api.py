@@ -312,6 +312,22 @@ class ApiTests(unittest.TestCase):
         _, state = self.get("/api/state")
         self.assertEqual(state["prefs"]["reader_theme"], "sepia")
 
+    def test_typography_prefs_are_stored(self):
+        status, body = self.post("/api/prefs", {"prefs": {"font_family": "Noto Serif",
+                                                          "reader_padding": 140,
+                                                          "line_height": 180,
+                                                          "font_scale": 115}})
+        self.assertEqual(status, 200)
+        prefs = body["prefs"]
+        self.assertEqual(prefs["font_family"], "Noto Serif")
+        self.assertEqual(prefs["reader_padding"], 140)
+        self.assertEqual(prefs["line_height"], 180)
+        self.assertEqual(prefs["font_scale"], 115)
+
+        # An empty family means "let the widget choose", so it must survive the roundtrip.
+        status, body = self.post("/api/prefs", {"prefs": {"font_family": ""}})
+        self.assertEqual(body["prefs"]["font_family"], "")
+
     def test_opml_export_and_import(self):
         self.add_feed()
         status, body = self.get("/api/opml")

@@ -1,6 +1,14 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.4.0: fixed five widget defects reported against 1.3.0 — the header feed toggle was pinned
+open by a width clause, serif/content preferences appeared dead because `font.family` received a
+CSS-style fallback list, the reader star never repainted after a toggle, there was no way to pick a
+folder or single feed from the list pane, and mark-all committed on a double click instead of a
+dialog. Content typography (theme, font, size, spacing, margins) is now five dropdowns backed by
+`font_family` and `reader_padding` prefs.
+
+## Previous Status
 Shipped v1.0.0 + follow-up: Plasma 6 applet `io.github.infidel.newscurator` + stdlib-only Python
 daemon `knewsd` (SQLite, JSON on 127.0.0.1:8770). v1.1: discovery, OPML file picker, favicons.
 v1.2 (this branch): strict URL validation before follow, bulk address check + follow
@@ -34,7 +42,18 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   `display: AbstractButton.IconOnly` (QtQuick.Controls) — `PlasmaComponents3.AbstractButton.IconOnly`
   is not guaranteed to resolve.
 - Properties auto-generate change signals: a `property string view` forbids `signal viewChanged`
-  (use `viewRequested`); same for `port` → `portEdited`.
+  (use `viewRequested`); same for `port` → `portEdited`, and `property var prefs` forbids
+  `signal prefsChanged` (SettingsSheet emits `subscribedChanged`/`prefsPatched` instead). The error
+  only appears at runtime: `Duplicate signal name: invalid override of property change signal`.
+- `font.family` takes **one** family name. A CSS-style list (`"Noto Serif, Georgia, serif"`) is
+  passed through literally, resolves to nothing and silently renders the default sans face — that
+  is why the old "Serif body text" checkbox looked dead.
+- Mutating a `property var` object in place (`article.starred = 1`) never notifies bindings; publish
+  a fresh copy (`Object.assign({}, article, {...})` style loop) so ReaderView repaints the star.
+- `PlasmaComponents3.MenuItem` with `checkable: true` destroys its own `checked` binding on click;
+  use `icon.name: selected ? "checkmark" : ""` for menu state instead.
+- The `/tmp/qh/imports` stub tree needs one wrapper per used type; `ComboBox`, `Menu`, `MenuItem`
+  and `MenuSeparator` were added for the 1.4.0 harnesses.
 - systemd `ReadWritePaths=` fails namespace setup (exit 226) if the path is missing → prefix
   with `-` and create dirs before start.
 - `systemctl enable --now` does not restart an already-running unit → install.sh uses
@@ -61,6 +80,16 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   LWN sweep was restored on the live DB (15 items → unread 159). Version 1.3.0.
 - 2026-11-11: `main.qml` needed `import org.kde.plasma.components as PlasmaComponents3`; without it
   the whole applet failed to load (`PlasmaComponents3 is neither a type nor a namespace`).
+- 2026-11-12: v1.4.0 — sidebar toggle visible-latch removed (`|| width > 46gu` pinned it open) and
+  the header button now swaps icon/tooltip both ways; new header `view-list-details` menu selects
+  smart view / folder / single feed (`sourceSelected(kind, value)` → `selectSmart|selectFolder|selectFeed`);
+  mark-all is a `ConfirmSheet` dialog (new component) instead of a 5 s double click; star toggle
+  republishes `article`; Settings *Reading* → *Content* with five ComboBoxes (theme, font incl.
+  sans/serif, size 80–160 %, spacing, margins) driving `font_family`, `serif`, `font_scale`,
+  `line_height`, `reader_padding`; `ReaderView.paddingPercent` scales the side margin
+  (harness: pad 60/100/140/180 → side 86/144/202/259 px, column 727/612/497/382 at 900 px wide).
+  Harness: 5 combos with correct labels, font list filtered to 8 installed choices, checkbox toggles
+  emit `prefChanged`. 44 backend tests green.
 - 2026-11-11: settings v2 — inline `component Section` cards, card sized
   `min(window-2*gu, 34gu)` x `min(window-2*gu, 42gu)` with equal edge margins, ScrollView
   `contentWidth: availableWidth` (old `width: sheet.width - 2*gu` overflowed the card),

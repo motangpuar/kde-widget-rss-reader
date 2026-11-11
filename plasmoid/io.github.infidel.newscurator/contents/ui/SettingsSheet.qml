@@ -16,6 +16,7 @@ Item {
 
     signal closed()
     signal prefChanged(string key, var value)
+    signal prefsPatched(var values)
     signal refreshNowRequested()
     signal importOpml(string text)
     signal feedsAdded(int added, int failed)
@@ -42,6 +43,38 @@ Item {
     function pref(key, fallback) {
         var value = prefs ? prefs[key] : undefined
         return value === undefined || value === null ? fallback : value
+    }
+
+    // Index of the entry whose `key` matches value, so a ComboBox can show the stored pref.
+    function indexOf(entries, key, value) {
+        for (var i = 0; i < entries.length; ++i)
+            if (entries[i][key] === value)
+                return i
+        return 0
+    }
+
+    // Curated families that are actually installed, so the list never offers a dead font.
+    function fontChoices() {
+        var wanted = ["Noto Serif", "Noto Sans", "Liberation Serif", "Liberation Sans",
+                      "Adwaita Sans", "Cantarell", "DejaVu Serif", "DejaVu Sans",
+                      "Source Serif 4", "Latin Modern Roman", "Georgia"]
+        var installed = Qt.fontFamilies()
+        var out = [{ "label": i18n("System sans"), "family": "", "serif": 0 },
+                   { "label": i18n("System serif"), "family": "", "serif": 1 }]
+        for (var i = 0; i < wanted.length; ++i)
+            if (installed.indexOf(wanted[i]) >= 0)
+                out.push({ "label": wanted[i], "family": wanted[i], "serif": 0 })
+        return out
+    }
+
+    function fontIndex() {
+        var choices = fontChoices()
+        var family = pref("font_family", "")
+        var serif = (pref("serif", 0) | 0) === 1
+        for (var i = 0; i < choices.length; ++i)
+            if (choices[i].family === family && choices[i].serif === (family.length > 0 ? 0 : serif))
+                return i
+        return 0
     }
 
     function favicon(feed) {
@@ -354,81 +387,122 @@ Item {
                     width: scroll.availableWidth
                     spacing: Kirigami.Units.smallSpacing * 2
 
-                    // ------------------------------------------------------ reading
+                    // ------------------------------------------------------ content
                     Section {
-                        title: i18n("Reading")
+                        title: i18n("Content")
+                        summary: i18n("how articles are rendered")
 
-                        RowLayout {
+                        GridLayout {
                             Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing / 2
-                            Repeater {
-                                model: ["auto", "light", "sepia", "dark"]
-                                delegate: Rectangle {
-                                    required property string modelData
-                                    readonly property bool active: sheet.pref("reader_theme", "auto") === modelData
-                                    implicitWidth: themeLabel.implicitWidth + Kirigami.Units.gridUnit * 0.8
-                                    implicitHeight: Math.round(Kirigami.Units.gridUnit * 1.3)
-                                    radius: implicitHeight / 2
-                                    color: active ? Kirigami.Theme.highlightColor
-                                                  : Qt.rgba(Kirigami.Theme.textColor.r,
-                                                            Kirigami.Theme.textColor.g,
-                                                            Kirigami.Theme.textColor.b, 0.1)
-                                    Text {
-                                        id: themeLabel
-                                        anchors.centerIn: parent
-                                        text: modelData
-                                        color: parent.active ? Kirigami.Theme.highlightedTextColor
-                                                             : Kirigami.Theme.textColor
-                                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
-                                        font.capitalization: Font.Capitalize
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: sheet.prefChanged("reader_theme", modelData)
-                                    }
-                                }
-                            }
-                            Item { Layout.fillWidth: true }
-                        }
+                            columns: 2
+                            columnSpacing: Kirigami.Units.gridUnit
+                            rowSpacing: Kirigami.Units.smallSpacing
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
                             Text {
-                                text: i18n("Text size")
+                                text: i18n("Theme")
                                 color: Kirigami.Theme.textColor
                                 font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
                             }
-                            PlasmaComponents3.Slider {
+                            PlasmaComponents3.ComboBox {
                                 Layout.fillWidth: true
-                                from: 80
-                                to: 170
-                                stepSize: 10
-                                snapMode: Slider.SnapAlways
-                                value: sheet.pref("font_scale", 100)
-                                onMoved: sheet.prefChanged("font_scale", Math.round(value))
+                                model: [{ "value": "auto", "label": i18n("Follow Plasma") },
+                                        { "value": "light", "label": i18n("Light") },
+                                        { "value": "sepia", "label": i18n("Sepia") },
+                                        { "value": "dark", "label": i18n("Dark") }]
+                                textRole: "label"
+                                currentIndex: sheet.indexOf(model, "value",
+                                                            sheet.pref("reader_theme", "auto"))
+                                onActivated: (index) => sheet.prefChanged("reader_theme",
+                                                                          model[index].value)
                             }
+
                             Text {
-                                text: sheet.pref("font_scale", 100) + "%"
-                                color: Kirigami.Theme.disabledTextColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                                text: i18n("Font")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
+                            }
+                            PlasmaComponents3.ComboBox {
+                                Layout.fillWidth: true
+                                model: sheet.fontChoices()
+                                textRole: "label"
+                                currentIndex: sheet.fontIndex()
+                                onActivated: (index) => {
+                                    var choice = model[index]
+                                    // Family and the sans/serif flag travel together.
+                                    sheet.prefsPatched({ "font_family": choice.family,
+                                                         "serif": choice.serif })
+                                }
+                            }
+
+                            Text {
+                                text: i18n("Size")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
+                            }
+                            PlasmaComponents3.ComboBox {
+                                Layout.fillWidth: true
+                                model: [80, 100, 115, 130, 145, 160]
+                                currentIndex: Math.max(0, model.indexOf(sheet.pref("font_scale", 100)))
+                                onActivated: (index) => sheet.prefChanged("font_scale", model[index])
+                                displayText: sheet.pref("font_scale", 100) + "%"
+                            }
+
+                            Text {
+                                text: i18n("Line spacing")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
+                            }
+                            PlasmaComponents3.ComboBox {
+                                Layout.fillWidth: true
+                                model: [{ "value": 140, "label": i18n("Tight") },
+                                        { "value": 160, "label": i18n("Normal") },
+                                        { "value": 180, "label": i18n("Relaxed") },
+                                        { "value": 200, "label": i18n("Airy") }]
+                                textRole: "label"
+                                currentIndex: sheet.indexOf(model, "value",
+                                                            sheet.pref("line_height", 160))
+                                onActivated: (index) => sheet.prefChanged("line_height",
+                                                                          model[index].value)
+                            }
+
+                            Text {
+                                text: i18n("Margins")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
+                            }
+                            PlasmaComponents3.ComboBox {
+                                Layout.fillWidth: true
+                                model: [{ "value": 60, "label": i18n("Narrow") },
+                                        { "value": 100, "label": i18n("Comfortable") },
+                                        { "value": 140, "label": i18n("Wide") },
+                                        { "value": 180, "label": i18n("Extra wide") }]
+                                textRole: "label"
+                                currentIndex: sheet.indexOf(model, "value",
+                                                            sheet.pref("reader_padding", 100))
+                                onActivated: (index) => sheet.prefChanged("reader_padding",
+                                                                          model[index].value)
                             }
                         }
 
-                        PlasmaComponents3.CheckBox {
-                            text: i18n("Serif body text")
-                            checked: sheet.pref("serif", 0) === 1
-                            onClicked: sheet.prefChanged("serif", checked ? 1 : 0)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Kirigami.Units.smallSpacing / 2
+                            implicitHeight: 1
+                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
+                                           Kirigami.Theme.textColor.b, 0.1)
                         }
+
                         PlasmaComponents3.CheckBox {
                             text: i18n("Mark read when opened")
                             checked: sheet.pref("auto_mark_read", 1) === 1
-                            onClicked: sheet.prefChanged("auto_mark_read", checked ? 1 : 0)
+                            // toggled (not clicked) so the handler only fires on a real change
+                            // and the checked binding is restored afterwards.
+                            onToggled: sheet.prefChanged("auto_mark_read", checked ? 1 : 0)
                         }
                         PlasmaComponents3.CheckBox {
-                            text: i18n("Open articles in the system browser instead of the reader")
+                            text: i18n("Open articles in the system browser instead")
                             checked: sheet.pref("open_external", 0) === 1
-                            onClicked: sheet.prefChanged("open_external", checked ? 1 : 0)
+                            onToggled: sheet.prefChanged("open_external", checked ? 1 : 0)
                         }
                     }
 

@@ -63,14 +63,22 @@ Uninstall (keeps your feeds and read state):
 | Read an article | click a row — opens the built-in reader |
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
-| Mark all read | double-click the read icon (5 s confirmation window) |
+| Browse by folder or source | `view-list-details` icon in the header menu: smart views, folders, feeds |
+| Show/hide the feed sidebar | `view-split-left-right` icon in the header |
+| Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
 | Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
 | Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
-| Settings | gear icon: theme, text size, serif, refresh interval, bulk add, feed removal, OPML |
+| Settings | gear icon: content typography (theme, font, size, spacing, margins), refresh interval, bulk add, feed removal, OPML |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
 Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.
+
+Content settings under *Settings → Content* are dropdowns, and every one of them maps to a
+stored preference: theme (`reader_theme`), font (`font_family` + `serif`), text size
+(`font_scale`, 80–160 %), line spacing (`line_height`) and side margins (`reader_padding`,
+60–180 %). The font list is filtered against `Qt.fontFamilies()`, so a family that is not
+installed never appears.
 
 ### Following a site
 
@@ -230,7 +238,7 @@ POST /api/extract             {"id": 1} — force re-extraction
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 43 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 44 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```

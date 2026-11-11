@@ -25,7 +25,10 @@ Item {
     property string selectionTitle: ""
     property string thumbBase: ""
     property bool sidebarVisible: true
-    property bool confirmMarkAll: false
+    property int selectedFeedId: 0
+    property string selectedFolder: ""
+    property var feeds: []
+    property var folders: []
 
     signal itemActivated(int id)
     signal starToggled(int id, bool starred)
@@ -36,6 +39,7 @@ Item {
     signal addFeedRequested()
     signal settingsRequested()
     signal sidebarToggled()
+    signal sourceSelected(string kind, string value)
     signal loadMoreRequested()
 
     Rectangle {
@@ -57,11 +61,71 @@ Item {
                 spacing: Kirigami.Units.smallSpacing / 2
 
                 PlasmaComponents3.ToolButton {
-                    visible: !listRoot.sidebarVisible
-                    icon.name: "application-menu"
+                    icon.name: listRoot.sidebarVisible ? "view-split-left-right" : "application-menu"
                     display: AbstractButton.IconOnly
                     onClicked: listRoot.sidebarToggled()
-                    PlasmaComponents3.ToolTip { text: i18n("Show feeds") }
+                    PlasmaComponents3.ToolTip {
+                        text: listRoot.sidebarVisible ? i18n("Hide feeds") : i18n("Show feeds")
+                    }
+                }
+
+                PlasmaComponents3.ToolButton {
+                    id: sourceButton
+                    icon.name: "view-list-details"
+                    display: AbstractButton.IconOnly
+                    onClicked: sourceMenu.popup()
+                    PlasmaComponents3.ToolTip { text: i18n("Browse by folder or source") }
+
+                    PlasmaComponents3.Menu {
+                        id: sourceMenu
+                        y: sourceButton.height
+
+                        PlasmaComponents3.MenuItem {
+                            text: i18n("Unread")
+                            icon.name: listRoot.view === "unread" && listRoot.selectedFeedId === 0
+                                       && listRoot.selectedFolder === "" ? "checkmark" : ""
+                            onTriggered: listRoot.sourceSelected("view", "unread")
+                        }
+                        PlasmaComponents3.MenuItem {
+                            text: i18n("Starred")
+                            icon.name: listRoot.view === "starred" ? "checkmark" : ""
+                            onTriggered: listRoot.sourceSelected("view", "starred")
+                        }
+                        PlasmaComponents3.MenuItem {
+                            text: i18n("All items")
+                            icon.name: listRoot.view === "all" && listRoot.selectedFeedId === 0
+                                       && listRoot.selectedFolder === "" ? "checkmark" : ""
+                            onTriggered: listRoot.sourceSelected("view", "all")
+                        }
+
+                        PlasmaComponents3.MenuSeparator {
+                            visible: listRoot.folders.length > 0
+                        }
+                        Repeater {
+                            model: listRoot.folders
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: i18n("Folder: %1", String(modelData))
+                                icon.name: listRoot.selectedFolder === String(modelData)
+                                           ? "checkmark" : ""
+                                onTriggered: listRoot.sourceSelected("folder", String(modelData))
+                            }
+                        }
+
+                        PlasmaComponents3.MenuSeparator {
+                            visible: listRoot.feeds.length > 0
+                        }
+                        Repeater {
+                            model: listRoot.feeds
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: modelData.title || modelData.url
+                                icon.name: listRoot.selectedFeedId === modelData.id
+                                           ? "checkmark" : ""
+                                onTriggered: listRoot.sourceSelected("feed", String(modelData.id))
+                            }
+                        }
+                    }
                 }
 
                 Text {
@@ -81,27 +145,10 @@ Item {
                 }
 
                 PlasmaComponents3.ToolButton {
-                    icon.name: listRoot.confirmMarkAll ? "dialog-ok-apply" : "mail-mark-read"
+                    icon.name: "mail-mark-read"
                     display: AbstractButton.IconOnly
-                    onClicked: {
-                        if (listRoot.confirmMarkAll) {
-                            listRoot.confirmMarkAll = false
-                            markAllTimer.stop()
-                            listRoot.markAllRequested()
-                        } else {
-                            listRoot.confirmMarkAll = true
-                            markAllTimer.restart()
-                        }
-                    }
-                    PlasmaComponents3.ToolTip {
-                        text: listRoot.confirmMarkAll ? i18n("Click again to mark everything read")
-                                                      : i18n("Mark all read")
-                    }
-                }
-                Timer {
-                    id: markAllTimer
-                    interval: 5000
-                    onTriggered: listRoot.confirmMarkAll = false
+                    onClicked: listRoot.markAllRequested()
+                    PlasmaComponents3.ToolTip { text: i18n("Mark everything here read…") }
                 }
                 PlasmaComponents3.ToolButton {
                     icon.name: listRoot.refreshRunning ? "view-refresh" : "view-refresh"

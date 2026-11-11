@@ -41,6 +41,7 @@ PlasmoidItem {
     property bool addFeedOpen: false
     property string addFeedFolder: ""
     property bool settingsOpen: false
+    property bool confirmMarkAllOpen: false
 
     // ---------------------------------------------------------- reader palette
     readonly property string readerTheme: prefs.reader_theme || "auto"
@@ -56,7 +57,12 @@ PlasmoidItem {
     readonly property bool serifPref: (prefs.serif | 0) === 1
     readonly property int fontScale: prefs.font_scale || 100
     readonly property real bodyFontSize: Math.round(Kirigami.Units.gridUnit * 0.92 * fontScale / 100)
-    readonly property string bodyFamily: serifPref ? "Noto Serif, Georgia, serif" : "Noto Sans, sans-serif"
+    // Qt resolves one family name; a CSS-style fallback list silently falls back to sans.
+    readonly property string chosenFamily: prefs.font_family || ""
+    readonly property string bodyFamily: chosenFamily.length > 0
+                                         ? chosenFamily
+                                         : (serifPref ? "Noto Serif" : "Noto Sans")
+    readonly property int readerPadding: prefs.reader_padding || 100
 
     // ------------------------------------------------------------------ wiring
     Component.onCompleted: {
@@ -245,8 +251,15 @@ PlasmoidItem {
                     copy[i].starred = starred ? 0 : 1
             }
             items = copy
-            if (article && article.id === id)
-                article.starred = starred ? 0 : 1
+            // `article` is a plain JS object: mutating it in place never re-evaluates the
+            // bindings in ReaderView, so publish a fresh copy to repaint the star.
+            if (article && article.id === id) {
+                var next = {}
+                for (var key in article)
+                    next[key] = article[key]
+                next.starred = starred ? 0 : 1
+                article = next
+            }
             refreshCounts()
         })
     }
@@ -260,9 +273,34 @@ PlasmoidItem {
         })
     }
 
+    // Snapshot of what the pending confirmation would touch, so the prompt can name it.
+    readonly property string scopeLabel: selectedFeedId > 0
+                                         ? feedTitle(selectedFeedId)
+                                         : selectedFolder ? selectedFolder
+                                         : (searchText.length > 0 ? i18n("the current search")
+                                                                  : i18n("every feed"))
+    readonly property int scopeUnread: (view === "unread" && searchText.length === 0)
+                                       ? totalItems : (counts.unread || 0)
+
+    function feedTitle(id) {
+        for (var i = 0; i < feeds.length; ++i)
+            if (feeds[i].id === id)
+                return feeds[i].title || feeds[i].url
+        return i18n("this feed")
+    }
+
+    function requestMarkAll() {
+        if (scopeUnread <= 0) {
+            showNotice(i18n("Nothing to mark read"))
+            return
+        }
+        confirmMarkAllOpen = true
+    }
+
     function markAllRead() {
         var body = selectedFeedId > 0 ? { "feed": selectedFeedId }
                  : selectedFolder ? { "folder": selectedFolder } : {}
+        confirmMarkAllOpen = false
         Api.request("POST", "/api/mark-all", body, function (status, data) {
             if (status !== 200 || !data) {
                 fail(status)
@@ -333,6 +371,20 @@ PlasmoidItem {
             } else {
                 fail(status)
             }
+        })
+    }
+
+    // Two preferences can belong to one control (family + serif), so allow a batch write.
+    function setPrefs(values) {
+        var merged = {}
+        for (var k in prefs)
+            merged[k] = prefs[k]
+        for (var k2 in values)
+            merged[k2] = values[k2]
+        serverPrefs = merged
+        Api.request("POST", "/api/prefs", { "prefs": values }, function (status, data) {
+            if (status === 200 && data)
+                serverPrefs = data.prefs
         })
     }
 
@@ -498,7 +550,9 @@ PlasmoidItem {
                 Layout.fillHeight: true
                 Layout.preferredWidth: Math.min(Kirigami.Units.gridUnit * 14, root.width * 0.3)
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 10
-                visible: !root.compactUi && (root.showSidebar || root.width > Kirigami.Units.gridUnit * 46)
+                // The header button owns this now; the width clause used to pin it open and
+                // made "hide feeds" look broken on wide widgets.
+                visible: !root.compactUi && root.showSidebar
                 feeds: root.feeds
                 folders: root.folders
                 counts: root.counts
@@ -541,12 +595,24 @@ PlasmoidItem {
                 thumbBase: "http://127.0.0.1:" + root.backendPort + "/api/thumb?id="
                 iconFor: (feedId) => root.feedIcon(feedId)
                 sidebarVisible: sidebar.visible
+                selectedFeedId: root.selectedFeedId
+                selectedFolder: root.selectedFolder
+                feeds: root.feeds
+                folders: root.folders
                 onItemActivated: (id) => root.openItem(id)
                 onStarToggled: (id, starred) => root.toggleStar(id, starred)
                 onViewRequested: (name) => { root.view = name; root.loadItems(true) }
                 onSearchChanged: (text) => { root.searchText = text; searchTimer.restart() }
                 onRefreshRequested: root.startRefresh()
-                onMarkAllRequested: root.markAllRead()
+                onMarkAllRequested: root.requestMarkAll()
+                onSourceSelected: (kind, value) => {
+                    if (kind === "view")
+                        root.selectSmart(value)
+                    else if (kind === "folder")
+                        root.selectFolder(value)
+                    else
+                        root.selectFeed(Number(value))
+                }
                 onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
                 onSidebarToggled: root.showSidebar = !root.showSidebar
@@ -574,6 +640,7 @@ PlasmoidItem {
                 bodyFamily: root.bodyFamily
                 bodyFontSize: root.bodyFontSize
                 lineHeightPercent: root.prefs.line_height || 160
+                paddingPercent: root.readerPadding
                 themeName: root.readerTheme
                 compactMode: root.compactUi
                 feedTitle: root.article ? (root.article.feed_title || "") : ""
@@ -609,6 +676,7 @@ PlasmoidItem {
             exportDir: root.exportDir
             onClosed: root.settingsOpen = false
             onPrefChanged: (key, value) => root.setPref(key, value)
+            onPrefsPatched: (values) => root.setPrefs(values)
             onRefreshNowRequested: root.startRefresh()
             onImportOpml: (text) => root.importOpml(text)
             onDeleteFeedRequested: (id) => root.deleteFeed(id)
@@ -627,6 +695,21 @@ PlasmoidItem {
                 else
                     root.showNotice(i18n("Added %1, %2 failed", added, failed))
             }
+        }
+
+        // One explicit confirmation for the destructive sweep instead of a timing window.
+        ConfirmSheet {
+            anchors.fill: parent
+            visible: root.confirmMarkAllOpen
+            title: i18n("Mark everything read?")
+            message: root.scopeUnread === 1
+                     ? i18n("1 unread item in %1 becomes read.", root.scopeLabel)
+                     : i18n("%1 unread items in %2 become read.", root.scopeUnread, root.scopeLabel)
+            detail: i18n("The notice banner keeps an Undo button for a few seconds afterwards.")
+            confirmLabel: i18n("Mark read")
+            confirmIcon: "mail-mark-read"
+            onConfirmed: root.markAllRead()
+            onCancelled: root.confirmMarkAllOpen = false
         }
 
         Rectangle {

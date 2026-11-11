@@ -16,6 +16,7 @@ Item {
     property string bodyFamily: "Noto Sans"
     property int bodyFontSize: 14
     property int lineHeightPercent: 160
+    property int paddingPercent: 100
     property string themeName: "auto"
     property bool compactMode: false
     property string feedTitle: ""
@@ -29,8 +30,13 @@ Item {
 
     readonly property real maxTextWidth: Math.min(Math.max(width - Kirigami.Units.gridUnit * 3, 200),
                                                   Kirigami.Units.gridUnit * 34)
-    readonly property real sidePadding: Math.max(Kirigami.Units.smallSpacing,
-                                                 (width - maxTextWidth) / 2)
+    // The padding setting scales the side margin, so wider padding reads as a narrower column
+    // and narrow padding lets the text use more of the width.
+    readonly property real basePadding: Math.max(Kirigami.Units.smallSpacing, (width - maxTextWidth) / 2)
+    readonly property real sidePadding: Math.min(width / 2 - Kirigami.Units.gridUnit,
+                                                 Math.max(Kirigami.Units.smallSpacing * 2,
+                                                          basePadding * paddingPercent / 100))
+    readonly property real columnWidth: Math.max(Kirigami.Units.gridUnit * 10, width - sidePadding * 2)
     readonly property real progress: {
         if (!flick.contentHeight || flick.contentHeight <= flick.height)
             return 1
@@ -154,7 +160,7 @@ Item {
                 id: contentColumn
                 x: reader.sidePadding
                 y: Kirigami.Units.gridUnit * 1.5
-                width: reader.maxTextWidth
+                width: reader.columnWidth
                 spacing: Math.round(reader.bodyFontSize * 0.95)
 
                 Text {
