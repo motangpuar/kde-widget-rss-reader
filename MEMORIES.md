@@ -1,6 +1,17 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.4.1 (unreleased): the six requested follow-ups. Bulk feed moves (`POST /api/feeds/move` +
+`db.move_feeds`) are driven from *Settings → Feeds* either by ticking rows and pressing **Move**
+or by dragging a row's handle onto a folder header (`DropArea` on the group header). The list
+pane's scope title is now the filter button itself (`TextBesideIcon`, `view-list-details`) instead
+of an unlabelled icon next to a static label. Reader typography gained a second surface: a
+`format-text` toolbar menu with Theme / Font / Size / Line spacing / Margins submenus, sharing
+`Typography.js` with the settings dropdowns and writing the same prefs via `setPrefs`.
+`lineHeightPercent` is now applied *and* scales block spacing, so line spacing is no longer a
+dead pref.
+
+## Previous Status
 v1.4.0: fixed five widget defects reported against 1.3.0 — the header feed toggle was pinned
 open by a width clause, serif/content preferences appeared dead because `font.family` received a
 CSS-style fallback list, the reader star never repainted after a toggle, there was no way to pick a
@@ -8,7 +19,6 @@ folder or single feed from the list pane, and mark-all committed on a double cli
 dialog. Content typography (theme, font, size, spacing, margins) is now five dropdowns backed by
 `font_family` and `reader_padding` prefs.
 
-## Previous Status
 Shipped v1.0.0 + follow-up: Plasma 6 applet `io.github.infidel.newscurator` + stdlib-only Python
 daemon `knewsd` (SQLite, JSON on 127.0.0.1:8770). v1.1: discovery, OPML file picker, favicons.
 v1.2 (this branch): strict URL validation before follow, bulk address check + follow
@@ -29,6 +39,14 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   restart + QML error grep).
 
 ## Known Blockers / Facts
+- `AbstractButton.toggle()` does **not** emit `toggled` (that signal is user-interaction only), so
+  an offscreen harness must call the handler's state setter directly or set `checked` — toggling a
+  checkbox programmatically proves nothing about `onToggled`.
+- Give repeated delegates an `objectName` when the harness has to find one specific kind: the item
+  tree also contains internal child items, so `text === ""` / `width < 40` predicates match dozens
+  of unrelated nodes (40 matches for 9 feed rows).
+- `DropArea` and `Menu`/`Popup` children are real items, so `findAll` can see a `DropArea`; a Menu
+  is not instantiated until the first `popup()`, so its items are invisible to the harness.
 - Host immutable (rpm-ostree); Plasma tooling only on host → scripts self re-exec through
   `distrobox-host-exec`. Project path is identical on both sides.
 - No `qmllint` on host, no `qml` runtime on host. Container has Qt 6.12 (`/usr/lib/qt6/bin/qmllint`,
@@ -67,14 +85,23 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   verification of `save_opml` must target paths the harness can read (or `/tmp/qh`).
 
 ## Next Steps
-1b. Discovery edge cases: YouTube channel pages return 404 to non-JS clients; consider a
-   `youtube.com/channel/UC…` → `feeds/videos.xml?channel_id=` special case.
-2. Optional: prefetch preview mark-read on scroll end (currently only on open).
-3. Ask user whether the accidental `POST /api/mark-all` at 18:32:25 (all 15 LWN items → read)
-   should be reverted; no bulk un-read endpoint exists yet.
+1. Ask the user to confirm the reader `format-text` menu and the drag handle behave in the live
+   widget — popups and real drags cannot be exercised in the offscreen harness.
+2. Discovery edge case: YouTube channel pages return 404 to non-JS clients; consider
+   `youtube.com/channel/UC…` → `feeds/videos.xml?channel_id=`.
+3. Optional: prefetch preview mark-read on scroll end (currently only on open).
 4. Consider capping stored `content` HTML per item and pruning old rows (DB growth).
+5. Live prefs hold `font_family: Cantarell`, `font_scale: 80`, `line_height: 140`. If the reader
+   reads too small, that is a stored preference, not a rendering bug — change it from the reader
+   menu.
 
 ## Chronological History
+- 2026-11-12: v1.4.1 — bulk feed moves (`db.move_feeds`, `POST /api/feeds/move`, 400 on a bad id
+  list, 404 on unknown ids) wired to checkboxes + a *Move* dropdown in *Settings → Feeds* and to a
+  `DropArea` on each folder header; `ArticleList` scope title became the filter button
+  (`TextBesideIcon`, no duplicate label); reader gained a `format-text` menu (Theme / Font / Size /
+  Line spacing / Margins) built from the new shared `Typography.js`; `lineHeightPercent` now sets
+  `Text.lineHeight` *and* scales block spacing.
 - 2026-11-11: `POST /api/mark-unread` (`db.mark_unread`, scope: ids → feed → folder → all) plus an
   *Undo* button in the 9 s notice banner, so a mark-all sweep is reversible; the accidental
   LWN sweep was restored on the live DB (15 items → unread 159). Version 1.3.0.
