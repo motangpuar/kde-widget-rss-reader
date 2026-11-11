@@ -19,6 +19,7 @@ Item {
     signal folderSelected(string folder)
     signal addFeedRequested()
     signal settingsRequested()
+    signal deleteFeedRequested(int id)
 
     readonly property int rowHeight: Math.round(Kirigami.Units.gridUnit * 1.7)
     readonly property var rows: {
@@ -135,6 +136,8 @@ Item {
                 height: rowItemRow.implicitHeight + Kirigami.Units.smallSpacing
                 radius: Kirigami.Units.smallSpacing / 2
                 readonly property bool active: sidebar.isActive(modelData)
+                readonly property bool removable: modelData.kind === "feed"
+                property bool confirmDelete: false
                 color: active ? Qt.rgba(Kirigami.Theme.highlightColor.r,
                                         Kirigami.Theme.highlightColor.g,
                                         Kirigami.Theme.highlightColor.b, 0.22)
@@ -209,6 +212,8 @@ Item {
                 MouseArea {
                     id: hoverArea
                     anchors.fill: parent
+                    anchors.rightMargin: rowItem.removable
+                                       ? Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2 : 0
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
@@ -218,6 +223,38 @@ Item {
                             sidebar.folderSelected(rowItem.modelData.key)
                         else
                             sidebar.feedSelected(parseInt(rowItem.modelData.key))
+                    }
+                }
+
+                // Unsubscribe: hover reveals the button, the first click arms it for 4 s.
+                PlasmaComponents3.ToolButton {
+                    id: deleteButton
+                    visible: rowItem.removable && (hoverArea.containsMouse || rowItem.confirmDelete)
+                    anchors.right: parent.right
+                    anchors.rightMargin: Kirigami.Units.smallSpacing
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitWidth: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                    implicitHeight: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                    icon.name: rowItem.confirmDelete ? "dialog-ok-apply" : "edit-delete"
+                    display: AbstractButton.IconOnly
+                    onClicked: {
+                        if (!rowItem.confirmDelete) {
+                            rowItem.confirmDelete = true
+                            confirmTimer.restart()
+                        } else {
+                            rowItem.confirmDelete = false
+                            sidebar.deleteFeedRequested(parseInt(rowItem.modelData.key))
+                        }
+                    }
+                    PlasmaComponents3.ToolTip {
+                        text: rowItem.confirmDelete
+                              ? i18n("Click again to unsubscribe from %1", rowItem.modelData.label)
+                              : i18n("Unsubscribe from %1", rowItem.modelData.label)
+                    }
+                    Timer {
+                        id: confirmTimer
+                        interval: 4000
+                        onTriggered: rowItem.confirmDelete = false
                     }
                 }
             }

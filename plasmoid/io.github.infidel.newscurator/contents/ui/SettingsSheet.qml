@@ -4,23 +4,107 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents3
+import "Api.js" as Api
 
 Item {
     id: sheet
 
     property var prefs: ({})
     property var feeds: []
-    property int port: 8770
     property bool backendUp: false
+    property string exportDir: ""
 
     signal closed()
     signal prefChanged(string key, var value)
-    signal portEdited(int value)
     signal refreshNowRequested()
     signal importOpml(string text)
+    signal feedsAdded(int added, int failed)
     signal deleteFeedRequested(int id)
 
     property string opmlStatus: ""
+    property string exportStatus: ""
+
+    // Bulk address validation: check every pasted line before adding anything.
+    property var checkResults: []
+    property bool checking: false
+    property bool adding: false
+
+    function addressLines() {
+        var raw = urlsArea.text.split(/[\s,]+/)
+        var out = []
+        for (var i = 0; i < raw.length; ++i) {
+            var text = raw[i].trim()
+            if (text.length > 0 && out.indexOf(text) < 0)
+                out.push(text)
+        }
+        return out.slice(0, 50)
+    }
+
+    function checkAddresses() {
+        var lines = addressLines()
+        if (lines.length === 0) {
+            exportStatus = i18n("Paste one feed address per line first.")
+            return
+        }
+        checking = true
+        checkResults = []
+        exportStatus = i18n("Checking %1 addresses…", lines.length)
+        Api.request("POST", "/api/validate", { "urls": lines }, function (status, data) {
+            sheet.checking = false
+            if (status !== 200 || !data) {
+                sheet.exportStatus = i18n("Could not check those addresses.")
+                return
+            }
+            sheet.checkResults = data.results || []
+            var good = sheet.checkResults.filter(function (r) { return r.ok }).length
+            var dupes = sheet.checkResults.filter(function (r) { return r.existing }).length
+            sheet.exportStatus = i18n("%1 of %2 addresses are usable feeds", good,
+                                      sheet.checkResults.length)
+                                  + (dupes > 0 ? i18n(" (%1 already followed)", dupes) : "")
+        })
+    }
+
+    function followChecked() {
+        var urls = checkResults.filter(function (r) { return r.ok && !r.existing })
+                                  .map(function (r) { return r.url })
+        if (urls.length === 0) {
+            exportStatus = i18n("Nothing to add: check the addresses first.")
+            return
+        }
+        adding = true
+        exportStatus = i18n("Following %1 feeds…", urls.length)
+        Api.request("POST", "/api/feeds/bulk",
+                    { "urls": urls, "folder": listFolder.text.trim() },
+                    function (status, data) {
+            sheet.adding = false
+            if (status !== 200 || !data) {
+                sheet.exportStatus = i18n("Could not add those feeds.")
+                return
+            }
+            var failed = (data.results || []).filter(function (r) { return !r.ok }).length
+            sheet.exportStatus = failed === 0
+                    ? (data.added === 1 ? i18n("Added 1 feed.") : i18n("Added %1 feeds.", data.added))
+                    : i18n("Added %1, %2 failed.", data.added, failed)
+            urlsArea.text = ""
+            sheet.checkResults = []
+            sheet.feedsAdded(data.added, failed)
+        })
+    }
+
+    function exportToFile(url) {
+        var path = url.toString().replace(/^file:\/\//, "")
+        exportStatus = i18n("Writing %1…", path)
+        Api.request("POST", "/api/opml/save", { "path": path }, function (status, data) {
+            if (status === 200 && data) {
+                sheet.exportStatus = i18n("Saved %1 feeds to %2", data.feeds, data.path)
+                if (data.fallback)
+                    sheet.exportStatus += " " + i18n("(that folder is not writable, so the "
+                                                     + "export went to the app data folder)")
+            } else
+                sheet.exportStatus = (data && data.error) ? data.error
+                                                          : i18n("Could not write that file.")
+        })
+    }
 
     function loadOpmlFile(url) {
         var path = url.toString()
@@ -51,6 +135,16 @@ Item {
         fileMode: FileDialog.OpenFile
         nameFilters: [i18n("OPML exports (*.opml *.xml)"), i18n("All files (*)")]
         onAccepted: sheet.loadOpmlFile(selectedFile)
+    }
+
+    FileDialog {
+        id: exportDialog
+        title: i18n("Save OPML export")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "opml"
+        acceptLabel: i18n("Save")
+        nameFilters: [i18n("OPML exports (*.opml)")]
+        onAccepted: sheet.exportToFile(selectedFile)
     }
 
     function pref(key, fallback) {
@@ -125,17 +219,9 @@ Item {
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.smallSpacing
                         Text {
-                            text: i18n("Port")
+                            text: i18n("Local backend")
                             color: Kirigami.Theme.textColor
                             font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.78)
-                        }
-                        SpinBox {
-                            from: 1024
-                            to: 65535
-                            stepSize: 1
-                            editable: true
-                            value: sheet.port
-                            onValueModified: sheet.portEdited(value)
                         }
                         Item { Layout.fillWidth: true }
                         Text {
@@ -319,9 +405,13 @@ Item {
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.smallSpacing
                         PlasmaComponents3.Button {
-                            text: i18n("Export OPML")
-                            icon.name: "document-export"
-                            onClicked: Qt.openUrlExternally("http://127.0.0.1:" + sheet.port + "/api/opml")
+                            text: i18n("Save OPML file…")
+                            icon.name: "document-save-as"
+                            onClicked: {
+                                if (sheet.exportDir.length > 0)
+                                    exportDialog.currentFolder = "file://" + sheet.exportDir
+                                exportDialog.open()
+                            }
                         }
                         PlasmaComponents3.Button {
                             text: i18n("Import OPML file…")
@@ -340,12 +430,36 @@ Item {
                         wrapMode: Text.WordWrap
                     }
 
-                    PlasmaComponents3.TextArea {
-                        id: opmlArea
+                    Rectangle {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: Kirigami.Units.gridUnit * 3
-                        placeholderText: i18n("…or paste the contents of an OPML file here")
+                        implicitHeight: 1
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
+                                       Kirigami.Theme.textColor.b, 0.12)
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: i18n("Add several feeds")
+                        color: Kirigami.Theme.textColor
+                        font.bold: true
+                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.85)
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: i18n("Paste one address per line. Nothing is followed until you check it and confirm.")
+                        color: Kirigami.Theme.disabledTextColor
+                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                        wrapMode: Text.WordWrap
+                    }
+
+                    PlasmaComponents3.TextArea {
+                        id: urlsArea
+                        Layout.fillWidth: true
+                        Layout.minimumHeight: Kirigami.Units.gridUnit * 4
+                        placeholderText: "lwn.net/headlines/rss\nhttps://arstechnica.com/feed/\nexample.substack.com"
                         wrapMode: TextEdit.Wrap
                         background: Rectangle {
                             color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
@@ -356,11 +470,81 @@ Item {
                             radius: Kirigami.Units.smallSpacing / 2
                         }
                     }
-                    PlasmaComponents3.Button {
-                        text: i18n("Import pasted OPML")
-                        icon.name: "document-import"
-                        enabled: opmlArea.text.length > 0
-                        onClicked: sheet.importOpml(opmlArea.text)
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents3.TextField {
+                            id: listFolder
+                            Layout.fillWidth: true
+                            placeholderText: i18n("Folder for the new feeds (optional)")
+                        }
+                        PlasmaComponents3.Button {
+                            text: i18n("Check addresses")
+                            icon.name: "dialog-ok-apply"
+                            enabled: !sheet.checking && !sheet.adding && urlsArea.text.length > 0
+                            onClicked: sheet.checkAddresses()
+                        }
+                        PlasmaComponents3.BusyIndicator {
+                            visible: sheet.checking || sheet.adding
+                            running: sheet.checking || sheet.adding
+                            implicitWidth: Kirigami.Units.gridUnit * 1.4
+                            implicitHeight: Kirigami.Units.gridUnit * 1.4
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: sheet.exportStatus.length > 0
+                        text: sheet.exportStatus
+                        color: Kirigami.Theme.disabledTextColor
+                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        visible: sheet.checkResults.length > 0
+
+                        Repeater {
+                            model: sheet.checkResults
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Kirigami.Icon {
+                                    source: modelData.ok ? "dialog-ok-apply" : "dialog-error"
+                                    color: modelData.ok ? Kirigami.Theme.positiveTextColor
+                                                        : Kirigami.Theme.negativeTextColor
+                                    implicitWidth: Kirigami.Units.iconSizes.small
+                                    implicitHeight: Kirigami.Units.iconSizes.small
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.ok
+                                          ? (modelData.title || modelData.url)
+                                            + " · " + i18n("%1 items", modelData.entries)
+                                            + (modelData.existing ? " · " + i18n("already followed") : "")
+                                          : modelData.url + " · " + (modelData.error || i18n("failed"))
+                                    color: modelData.ok ? Kirigami.Theme.textColor
+                                                        : Kirigami.Theme.negativeTextColor
+                                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+
+                        PlasmaComponents3.Button {
+                            Layout.topMargin: Kirigami.Units.smallSpacing
+                            text: i18n("Follow checked feeds")
+                            icon.name: "list-add"
+                            enabled: !sheet.adding
+                                     && sheet.checkResults.filter(function (r) { return r.ok && !r.existing }).length > 0
+                            onClicked: sheet.followChecked()
+                        }
                     }
                 }
             }

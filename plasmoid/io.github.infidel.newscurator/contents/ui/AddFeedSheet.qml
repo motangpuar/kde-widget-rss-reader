@@ -13,6 +13,10 @@ Item {
     property string selectedUrl: ""
     property string message: ""
     property bool busy: false
+    property bool validated: false
+    property bool validating: false
+    property string validationText: ""
+    property bool validationOk: false
 
     signal accepted(string url, string folder)
     signal cancelled()
@@ -22,8 +26,53 @@ Item {
         selectedUrl = ""
         message = ""
         busy = false
+        validated = false
+        validating = false
+        validationText = ""
+        validationOk = false
         urlField.text = ""
         folderField.text = ""
+    }
+
+    // Strictly verify that the selected address is a usable feed *before* adding it,
+    // so a follower never ends up with a dead or empty subscription.
+    function validate() {
+        if (!selectedUrl) {
+            validationText = i18n("Pick a feed first.")
+            validationOk = false
+            validated = false
+            return
+        }
+        validating = true
+        validated = false
+        validationText = i18n("Checking %1…", selectedUrl)
+        validationOk = false
+        Api.request("GET", "/api/validate?url=" + Api.encode(selectedUrl), null, function (status, data) {
+            sheet.validating = false
+            if (status !== 200 || !data) {
+                sheet.validationText = i18n("Could not check that feed.")
+                sheet.validationOk = false
+                return
+            }
+            if (!data.ok) {
+                sheet.validationText = i18n("Not usable: %1", data.error || i18n("unreachable"))
+                sheet.validationOk = false
+                return
+            }
+            sheet.validated = true
+            sheet.validationOk = true
+            sheet.validationText = data.empty
+                    ? i18n("Valid feed, but it has no items yet: %1", data.title)
+                    : i18n("%1 items available from %2", data.entries, data.title)
+        })
+    }
+
+    onSelectedUrlChanged: {
+        validated = false
+        validationOk = false
+        validationText = ""
+        if (selectedUrl.length > 0)
+            validate()
     }
 
     function discover() {
@@ -57,7 +106,7 @@ Item {
     }
 
     function submit() {
-        if (!selectedUrl || busy)
+        if (!selectedUrl || busy || !validated)
             return
         busy = true
         sheet.accepted(selectedUrl, folderField.text)
@@ -237,6 +286,37 @@ Item {
                 }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    source: sheet.validating ? "view-refresh"
+                                             : (sheet.validationOk ? "dialog-ok-apply"
+                                                                   : (sheet.validationText ? "dialog-error" : "help-hint"))
+                    implicitWidth: Kirigami.Units.iconSizes.small
+                    implicitHeight: Kirigami.Units.iconSizes.small
+                    color: sheet.validationOk ? Kirigami.Theme.positiveTextColor
+                                              : (sheet.validationText ? Kirigami.Theme.negativeTextColor
+                                                                      : Kirigami.Theme.disabledTextColor)
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: sheet.validationText || i18n("Feeds are checked before they are added.")
+                    color: sheet.validationOk ? Kirigami.Theme.positiveTextColor
+                                              : (sheet.validationText ? Kirigami.Theme.negativeTextColor
+                                                                      : Kirigami.Theme.disabledTextColor)
+                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                    elide: Text.ElideRight
+                }
+                PlasmaComponents3.Button {
+                    text: i18n("Validate")
+                    icon.name: "dialog-ok-apply"
+                    enabled: sheet.selectedUrl.length > 0 && !sheet.validating && !sheet.busy
+                    onClicked: sheet.validate()
+                }
+            }
+
             PlasmaComponents3.TextField {
                 id: folderField
                 Layout.fillWidth: true
@@ -258,8 +338,12 @@ Item {
                 PlasmaComponents3.Button {
                     text: i18n("Follow")
                     icon.name: "list-add"
-                    enabled: sheet.selectedUrl.length > 0 && !sheet.busy
+                    enabled: sheet.selectedUrl.length > 0 && !sheet.busy && sheet.validated
                     onClicked: sheet.submit()
+                    PlasmaComponents3.ToolTip {
+                        text: sheet.validated ? i18n("Add this feed")
+                                              : i18n("Validate the feed before following it")
+                    }
                 }
             }
         }

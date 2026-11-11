@@ -300,6 +300,39 @@ def refresh_feed(store: Store, feed: dict[str, Any], max_items: int) -> dict[str
             "items": len(parsed["entries"])}
 
 
+def probe(address: str, timeout: float = 15.0) -> dict[str, Any]:
+    """Check that a single address is a usable feed, without touching the store.
+
+    Strict by design: no HTML discovery, no redirect guessing. Returns
+    {"url", "ok", "title", "entries", "empty", "icon", "error"}.
+    """
+    try:
+        url = _normalize_address(address)
+    except FetchError as exc:
+        return {"url": str(address or "").strip(), "ok": False, "error": str(exc)}
+
+    try:
+        response = http_get(url, timeout=timeout)
+        parsed = feedmod.parse_feed(response["body"], response["url"] or url)
+    except Exception as exc:  # noqa: BLE001 - report instead of raising
+        return {"url": url, "ok": False, "error": str(exc)}
+
+    resolved = response["url"] or url
+    entries = len(parsed["entries"])
+    result: dict[str, Any] = {
+        "url": resolved,
+        "ok": True,
+        "title": parsed["title"] or urlparse(resolved).netloc,
+        "site": parsed["site"] or resolved,
+        "icon": parsed.get("icon") or "",
+        "entries": entries,
+        "empty": entries == 0,
+        "newest": (parsed["entries"][0].get("published") or 0) if entries else 0,
+        "error": "" if entries else "feed is valid but currently empty",
+    }
+    return result
+
+
 def add_feed(store: Store, url: str, folder: str = "", title: str = "") -> dict[str, Any]:
     """Add a feed URL, following HTML pages to discover the feed."""
     url = url.strip()

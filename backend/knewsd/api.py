@@ -8,11 +8,13 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from . import config
 from . import fetch as fetchmod
 from . import feeds as feedmod
 from .config import DEFAULT_PORT, VERSION
@@ -21,6 +23,42 @@ from .db import Store
 CLIENT_HEADER = "x-knews-client"
 ACCESS_LOG = os.environ.get("KNEWS_ACCESS_LOG") == "1"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def save_opml(store: Store, raw_path: str) -> dict[str, Any]:
+    """Write an OPML export, falling back to the data dir when the target is read-only.
+
+    The daemon runs under systemd with ``ProtectHome=read-only``, so a save dialog can
+    legitimately point at a path the unit may not write. The export still lands somewhere
+    the user can find, and the reply says which path was actually used.
+    """
+    raw = str(raw_path or "").strip()
+    if not raw:
+        raise ValueError("path required")
+    target = Path(os.path.expanduser(raw))
+    if not target.is_absolute():
+        raise ValueError("absolute path required")
+    if target.suffix.lower() not in (".opml", ".xml"):
+        target = target.with_suffix(".opml")
+
+    feeds = store.feeds()
+    payload = feedmod.build_opml(feeds).encode()
+    fallback = False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        scratch = target.with_name(target.name + ".tmp")
+        scratch.write_bytes(payload)
+        scratch.replace(target)
+    except OSError:
+        fallback = True
+        exports = config.data_dir() / "exports"
+        exports.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = exports / f"news-curator-{stamp}.opml"
+        target.write_bytes(payload)
+
+    return {"ok": True, "path": str(target), "requested": raw, "fallback": fallback,
+            "bytes": len(payload), "feeds": len(feeds)}
 
 
 class RefreshManager:
@@ -75,6 +113,7 @@ class Api:
             "counts": self.store.counts(),
             "prefs": self.store.prefs(),
             "refresh": self.refresh.state,
+            "export_dir": str(Path.home() / "Downloads"),
             "version": VERSION,
         }
 
@@ -92,6 +131,25 @@ class Api:
                 candidate["title"] = candidate["title"] or known[candidate["url"]]
         result["ok"] = True
         return result
+
+    def probe_urls(self, urls: list[Any], limit: int = 50) -> list[dict[str, Any]]:
+        """Validate a list of addresses in parallel; never raises for bad input."""
+        cleaned: list[str] = []
+        for raw in urls or []:
+            text = str(raw or "").strip()
+            if text and text not in cleaned:
+                cleaned.append(text)
+        cleaned = cleaned[:limit]
+        if not cleaned:
+            return []
+        known = {feed["url"]: feed["title"] for feed in self.store.feeds()}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(fetchmod.probe, cleaned))
+        for item in results:
+            item["existing"] = item["url"] in known
+            if item["existing"]:
+                item["title"] = item["title"] or known[item["url"]]
+        return results
 
     def item_list(self, query: dict[str, list[str]]) -> dict[str, Any]:
         def one(name: str, default: str = "") -> str:
@@ -235,6 +293,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, result[0], result[1])
             elif route == "/api/discover":
                 self._send(200, self.api.discover(query))
+            elif route == "/api/validate":
+                results = self.api.probe_urls([(query.get("url") or [""])[0]])
+                self._send(200, results[0] if results
+                           else {"url": "", "ok": False, "error": "no url given"})
             elif route == "/api/refresh/status":
                 self._send(200, self.api.refresh.state)
             elif route == "/api/opml":
@@ -265,6 +327,32 @@ class Handler(BaseHTTPRequestHandler):
                 result = fetchmod.add_feed(store, url, str(body.get("folder") or ""),
                                            str(body.get("title") or ""))
                 self._send(200, {"ok": True, "feed": result, "state": self.api.state()})
+            elif route == "/api/validate":
+                urls = body.get("urls")
+                if urls is None:
+                    urls = [body.get("url") or ""]
+                if isinstance(urls, str):
+                    urls = [urls]
+                self._send(200, {"results": self.api.probe_urls(list(urls))})
+            elif route == "/api/feeds/bulk":
+                folder = str(body.get("folder") or "")
+                urls = body.get("urls")
+                if isinstance(urls, str):
+                    urls = [urls]
+                results = []
+                for raw in list(urls or [])[:50]:
+                    url = str(raw or "").strip()
+                    if not url:
+                        continue
+                    try:
+                        feed = fetchmod.add_feed(store, url, folder, "")
+                        results.append({"url": url, "ok": True, "feed": feed})
+                    except Exception as exc:  # noqa: BLE001 - report per url
+                        results.append({"url": url, "ok": False, "error": str(exc)})
+                self._send(200, {"ok": True,
+                                 "added": len([r for r in results if r["ok"]]),
+                                 "results": results,
+                                 "state": self.api.state()})
             elif route == "/api/feeds/delete":
                 store.delete_feed(int(body.get("id") or 0))
                 self._send(200, self.api.state())
@@ -302,6 +390,8 @@ class Handler(BaseHTTPRequestHandler):
                     except fetchmod.FetchError as exc:
                         added.append({"url": entry["url"], "error": str(exc)})
                 self._send(200, {"ok": True, "imported": added, "state": self.api.state()})
+            elif route == "/api/opml/save":
+                self._send(200, save_opml(store, str(body.get("path") or "")))
             elif route == "/api/extract":
                 item_id = int(body.get("id") or 0)
                 item = store.item(item_id)

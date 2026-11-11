@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from knewsd import api as api_mod
+from knewsd.fetch import FetchError
 from knewsd import feeds as feedmod
 from knewsd.db import Store
 
@@ -37,6 +38,8 @@ class ApiTests(unittest.TestCase):
         self.store = Store(Path(self.tmp.name) / "test.db")
 
         def fake_get(url, etag=None, last_modified=None, timeout=20, max_bytes=None):
+            if url.endswith("/broken") or "broken" in url:
+                raise FetchError(f"HTTP 404 for {url}")
             if url.endswith("/p1"):
                 return {"status": 200, "body": PAGE.encode(), "url": url,
                         "headers": {"content-type": "text/html; charset=utf-8"}}
@@ -97,6 +100,87 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(state["counts"]["feeds"], 0)
         self.assertIn("prefs", state)
+
+    def test_validate_single_url(self):
+        status, body = self.get("/api/validate?url=https://example.org/feed.xml")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"], body)
+        self.assertEqual(body["title"], "Test Feed")
+        self.assertEqual(body["entries"], 2)
+        self.assertFalse(body["existing"])
+
+        self.add_feed()
+        status, body = self.get("/api/validate?url=https://example.org/feed.xml")
+        self.assertTrue(body["existing"])
+
+        status, body = self.get("/api/validate?url=https://example.org/broken")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["ok"])
+        self.assertTrue(body["error"])
+
+    def test_validate_many_urls(self):
+        status, body = self.post("/api/validate", {"urls": ["https://example.org/feed.xml",
+                                                            "https://example.org/broken",
+                                                            "https://example.org/feed.xml"]})
+        self.assertEqual(status, 200, body)
+        results = body["results"]
+        self.assertEqual(len(results), 2)          # duplicates collapsed
+        self.assertTrue(results[0]["ok"])
+        self.assertFalse(results[1]["ok"])
+
+    def test_bulk_add_feeds(self):
+        status, body = self.post("/api/feeds/bulk",
+                                 {"urls": ["https://example.org/feed.xml",
+                                           "https://example.org/broken"],
+                                  "folder": "Batch"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["added"], 1)
+        outcomes = {r["url"]: r["ok"] for r in body["results"]}
+        self.assertTrue(outcomes["https://example.org/feed.xml"])
+        self.assertFalse(outcomes["https://example.org/broken"])
+        self.assertEqual(body["state"]["counts"]["feeds"], 1)
+        self.assertEqual(body["state"]["feeds"][0]["folder"], "Batch")
+
+    def test_export_opml_falls_back_when_target_unwritable(self):
+        from unittest import mock
+
+        from knewsd import api as api_mod
+
+        path = Path(self.tmp.name) / "blocked" / "export.opml"
+        real_write = Path.write_bytes
+
+        def guarded(self, data):
+            if str(self).startswith(str(path.parent)):
+                raise OSError(30, "Read-only file system")
+            return real_write(self, data)
+
+        with mock.patch.object(Path, "write_bytes", guarded):
+            payload = api_mod.save_opml(self.store, str(path))
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["fallback"])
+        self.assertEqual(payload["requested"], str(path))
+        self.assertTrue(Path(payload["path"]).is_file())
+        self.assertTrue(Path(payload["path"]).read_bytes().startswith(b"<?xml"))
+
+    def test_state_exposes_export_dir(self):
+        status, payload = self.get("/api/state")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["export_dir"].endswith("Downloads"))
+
+    def test_export_opml_to_file(self):
+        self.add_feed()
+        target = Path(self.tmp.name) / "exports" / "backup.opml"
+        status, body = self.post("/api/opml/save", {"path": str(target.with_suffix(""))})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["ok"])
+        self.assertEqual(Path(body["path"]), target)
+        self.assertGreaterEqual(body["feeds"], 1)
+        self.assertIn("<opml", target.read_text(encoding="utf-8"))
+
+        status, body = self.post("/api/opml/save", {"path": "relative.opml"})
+        self.assertEqual(status, 400)
+        self.assertFalse(body.get("ok", False))
 
     def test_add_feed_and_list_items(self):
         feed_id = self.add_feed()

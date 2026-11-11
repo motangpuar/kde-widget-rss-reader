@@ -14,6 +14,7 @@ PlasmoidItem {
     // ------------------------------------------------------------- data state
     property var feeds: []
     property var folders: []
+    property string exportDir: ""
     property var counts: ({ "unread": 0, "starred": 0, "all": 0, "feeds": 0 })
     property var serverPrefs: ({
         "reader_theme": "auto", "serif": 0, "font_scale": 100, "line_height": 160,
@@ -96,7 +97,7 @@ PlasmoidItem {
     function fail(status) {
         backendUp = false
         statusMessage = status === 0
-            ? i18n("Backend offline — start knewsd or check the port in settings.")
+            ? i18n("Backend offline — start the knewsd background service.")
             : i18n("Backend error (HTTP %1).", status)
     }
 
@@ -108,6 +109,7 @@ PlasmoidItem {
                 feeds = data.feeds || []
                 folders = data.folders || []
                 counts = data.counts || root.counts
+                exportDir = data.export_dir || root.exportDir
                 serverPrefs = data.prefs || root.serverPrefs
                 refreshRunning = !!(data.refresh && data.refresh.running)
                 if (reloadItems !== false)
@@ -336,14 +338,24 @@ PlasmoidItem {
     }
 
     function deleteFeed(id) {
-        Api.request("POST", "/api/feeds/delete", { "id": id }, function (status) {
-            if (status === 200) {
-                if (selectedFeedId === id) {
-                    selectedFeedId = 0
-                    loadItems(true)
-                }
-                loadState(false)
+        var title = ""
+        for (var i = 0; i < feeds.length; ++i) {
+            if (feeds[i].id === id)
+                title = feeds[i].title || feeds[i].url
+        }
+        Api.request("POST", "/api/feeds/delete", { "id": id }, function (status, data) {
+            if (status !== 200) {
+                root.showNotice(i18n("Could not remove %1", title))
+                return
             }
+            if (root.selectedFeedId === id) {
+                root.selectedFeedId = 0
+                root.currentItemId = 0
+                root.readerOpen = false
+                root.loadItems(true)
+            }
+            root.loadState(false)
+            root.showNotice(i18n("Removed %1", title))
         })
     }
 
@@ -468,6 +480,7 @@ PlasmoidItem {
                 onFolderSelected: (folder) => root.selectFolder(folder)
                 onAddFeedRequested: root.addFeedOpen = true
                 onSettingsRequested: root.settingsOpen = true
+                onDeleteFeedRequested: (id) => root.deleteFeed(id)
             }
 
             Rectangle {
@@ -561,13 +574,22 @@ PlasmoidItem {
             visible: root.settingsOpen
             prefs: root.prefs
             feeds: root.feeds
-            port: root.backendPort
             backendUp: root.backendUp
+            exportDir: root.exportDir
             onClosed: root.settingsOpen = false
             onPrefChanged: (key, value) => root.setPref(key, value)
-            onPortEdited: (value) => Plasmoid.configuration.port = value
             onRefreshNowRequested: root.startRefresh()
             onImportOpml: (text) => root.importOpml(text)
+            onDeleteFeedRequested: (id) => root.deleteFeed(id)
+            onFeedsAdded: (added, failed) => {
+                root.settingsOpen = false
+                root.loadState(true)
+                if (failed === 0)
+                    root.showNotice(added === 1 ? i18n("Added 1 feed")
+                                                : i18n("Added %1 feeds", added))
+                else
+                    root.showNotice(i18n("Added %1, %2 failed", added, failed))
+            }
         }
 
         Rectangle {

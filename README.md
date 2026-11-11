@@ -18,7 +18,12 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
   applet searches the page for feeds, like Inoreader's follow box.
 - **Source icons** — cached favicons next to each feed in the sidebar and next to the source name
   in the article list.
-- **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import (file picker or paste) / export.
+- **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import/export.
+- **Bulk follow** — paste a list of addresses, validate them all in parallel, then follow only the
+  ones that actually serve a feed.
+- **Guarded adds** — the follow dialog validates a URL before offering *Follow*, so a typo or a
+  dead feed never lands in your list.
+- **Feed removal** — hover any feed in the sidebar for a delete button (second click confirms).
 - **State** — unread counts, folders, stars, mark-all-read, background refresh with
   ETag/Last-Modified conditional requests.
 
@@ -59,7 +64,8 @@ Uninstall (keeps your feeds and read state):
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
 | Mark all read | double-click the read icon (5 s confirmation window) |
-| Settings | gear icon: theme, text size, serif, refresh interval, port, feed removal, OPML |
+| Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
+| Settings | gear icon: theme, text size, serif, refresh interval, bulk add, feed removal, OPML |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
 Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.
@@ -87,8 +93,10 @@ rejected with "could not reach …" — paste the feed URL directly for those.
 1. **Import a file** — gear icon → *Import OPML file…* → pick the `.opml`/`.xml` export from
    Feedly, Inoreader, FreshRSS, Newsboat, … Nested OPML folders become feed folders;
    `xmlUrl`/`xmlurl`, `title`/`text` are both accepted.
-2. **Paste** — gear icon → paste into the text box → *Import pasted OPML* (fallback for exports
-   that live on another machine).
+2. **Bulk add addresses** — gear icon → *Add several feeds* → paste one address per line →
+   *Check addresses* → *Follow checked feeds* (folder optional). All addresses are probed in
+   parallel; rows show the resolved title and item count, dead ones show the HTTP error, and
+   feeds you already follow are marked so they are skipped.
 3. **Import from disk over the API** (scripted, no copy-paste):
 
 ```bash
@@ -108,6 +116,18 @@ EOF
 ```
 
 Feeds are fetched immediately; failures are reported per URL and can be retried from Settings.
+
+### Taking feeds out
+
+Gear icon → *Save OPML file…* writes a full OPML 2.0 export wherever the file dialog points
+(`~/Downloads` by default). If the chosen folder is not writable by the systemd unit, the export
+falls back to `~/.local/share/knews-curator/exports/` and the status line says so. Scripted export:
+
+```bash
+curl -sS -H "X-Knews-Client: plasma" -X POST http://127.0.0.1:8770/api/opml/save \
+     -d '{"path": "~/Downloads/news-curator.opml"}'
+# {"ok": true, "path": "...", "feeds": 10, "bytes": 1835, "fallback": false}
+```
 
 Single feeds: `+` in the header, or `POST /api/feeds {"url": "...", "folder": "Tech"}`.
 
@@ -163,12 +183,16 @@ Bind to loopback only. All state-changing POSTs must carry `X-Knews-Client: plas
 requests with an `Origin` header or a non-loopback `Host` are rejected.
 
 ```
-GET  /api/health              {"ok": true, "version": "1.0.0"}
+GET  /api/health              {"ok": true, "version": "1.2.0"}
 GET  /api/state               feeds, folders, counts, prefs
 GET  /api/items?view=&feed=&folder=&q=&limit=&offset=
 GET  /api/item?id=&read=1     article detail with blocks
 GET  /api/thumb?id=           cached thumbnail bytes
 GET  /api/discover?url=       feed discovery: {ok, direct, candidates[{url,title,icon,entries,existing}]}
+GET  /api/validate?url=       strict single-URL probe: {ok, title, entries, empty, error, existing}
+POST /api/validate            {"urls": [...]} → {"results": [{ok, title, entries, error, existing}]}
+POST /api/feeds/bulk          {"urls": [...], "folder": ""} → {"ok", "added", "results", "state"}
+POST /api/opml/save           {"path": "/abs/or/~/file.opml"} → {ok, path, bytes, feeds, fallback}
 GET  /api/refresh/status      background refresh progress
 GET  /api/opml                OPML export
 POST /api/feeds               {"url": "...", "folder": "..."}
@@ -185,7 +209,7 @@ POST /api/extract             {"id": 1} — force re-extraction
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 32 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 38 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```
@@ -218,7 +242,11 @@ Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit e
   content and the reader says so ("Partial extraction"); the browser button is always there.
 - Mark-all-read has no bulk undo — it asks for a second click within 5 seconds.
 - The applet keeps the last 300 items per feed (`max_items_per_feed`).
-- Port changes in Settings take effect after restarting the unit:
+- The systemd unit runs with `ProtectHome=read-only`; `~/Downloads`, `~/Documents` and
+  `~/Desktop` are writable for OPML exports, anything else falls back to the app data folder.
+- The port is not exposed in the applet UI (it is an install-time detail, default `8770`).
+  To change it, edit `contents/config/main.xml`'s default or `Plasmoid.configuration.port`,
+  then restart the unit:
   `systemctl --user restart knewsd`.
 
 ## License

@@ -12,7 +12,7 @@
     "Id": "io.github.infidel.newscurator",
     "License": "MIT",
     "Name": "News Curator",
-    "Version": "1.0.0"
+    "Version": "1.2.0"
   },
   "X-Plasma-API-Minimum-Version": "6.0",
   "X-Plasma-MainScript": "ui/main.qml"

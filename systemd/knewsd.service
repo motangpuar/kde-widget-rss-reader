@@ -18,6 +18,8 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=-%h/.local/share/knews-curator -%h/.cache/knews-curator
+# OPML exports go wherever the save dialog points (Downloads/Documents/Desktop).
+ReadWritePaths=-%h/Downloads -%h/Documents -%h/Desktop
 
 [Install]
 WantedBy=default.target
