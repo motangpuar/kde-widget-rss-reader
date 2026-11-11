@@ -14,7 +14,11 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
   WebView, so it stays fast, theme-consistent and offline-readable.
 - **Offline images** — remote images are cached under `~/.cache/knews-curator/images` and
   served as `file://` URIs.
-- **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import/export.
+- **Feed discovery** — type a site address (`lwn.net`, `arstechnica.com`, a channel URL) and the
+  applet searches the page for feeds, like Inoreader's follow box.
+- **Source icons** — cached favicons next to each feed in the sidebar and next to the source name
+  in the article list.
+- **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import (file picker or paste) / export.
 - **State** — unread counts, folders, stars, mark-all-read, background refresh with
   ETag/Last-Modified conditional requests.
 
@@ -49,8 +53,8 @@ Uninstall (keeps your feeds and read state):
 
 | Action | Where |
 |---|---|
-| Add feed | `+` in the header, or sidebar header |
-| Feed folders | type a folder name when adding |
+| Add feed | `+` in the header: type an address, **Find feeds**, pick a result, **Follow** |
+| Feed folders | type a folder name in the follow dialog |
 | Read an article | click a row — opens the built-in reader |
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
@@ -59,6 +63,65 @@ Uninstall (keeps your feeds and read state):
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
 Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.
+
+### Following a site
+
+Click `+` in the header and type any of these:
+
+| You type | What happens |
+|---|---|
+| `lwn.net` | page scan → `https://lwn.net/headlines/rss` |
+| `https://arstechnica.com` | page scan → `https://arstechnica.com/feed/` |
+| `https://…/rss.xml` | recognised directly, no scan |
+| `example.substack.com` | page scan → `/feed` |
+
+Every candidate shows its title, URL, feed count and favicon; feeds you already follow are marked
+*Already followed*. Discovery takes a second or two per site; the result list is cached nowhere, so
+run it again if you typed the wrong address.
+
+Sites that build their feeds with JavaScript (some YouTube channel pages, Reddit user pages) are
+rejected with "could not reach …" — paste the feed URL directly for those.
+
+### Bringing feeds over from another reader
+
+1. **Import a file** — gear icon → *Import OPML file…* → pick the `.opml`/`.xml` export from
+   Feedly, Inoreader, FreshRSS, Newsboat, … Nested OPML folders become feed folders;
+   `xmlUrl`/`xmlurl`, `title`/`text` are both accepted.
+2. **Paste** — gear icon → paste into the text box → *Import pasted OPML* (fallback for exports
+   that live on another machine).
+3. **Import from disk over the API** (scripted, no copy-paste):
+
+```bash
+python3 - <<'EOF'
+import json, urllib.request
+opml = open("feeds.opml", encoding="utf-8").read()
+req = urllib.request.Request(
+    "http://127.0.0.1:8770/api/opml",
+    data=json.dumps({"opml": opml}).encode(),
+    headers={"X-Knews-Client": "plasma", "Content-Type": "application/json"})
+res = json.load(urllib.request.urlopen(req))
+print("imported", len([e for e in res["imported"] if "error" not in e]), "feeds")
+for entry in res["imported"]:
+    if "error" in entry:
+        print("FAILED", entry["url"], entry["error"])
+EOF
+```
+
+Feeds are fetched immediately; failures are reported per URL and can be retried from Settings.
+
+Single feeds: `+` in the header, or `POST /api/feeds {"url": "...", "folder": "Tech"}`.
+
+```bash
+# any site
+https://lwn.net/headlines/rss
+# Substack / Ghost / WordPress
+https://example.substack.com/feed
+# YouTube channel (channel_id from the channel page source)
+https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxxxx
+# Reddit subreddit, GitHub releases
+https://www.reddit.com/r/linux/.rss
+https://github.com/kde/plasma-desktop/releases.atom
+```
 
 ## Architecture
 
@@ -105,6 +168,7 @@ GET  /api/state               feeds, folders, counts, prefs
 GET  /api/items?view=&feed=&folder=&q=&limit=&offset=
 GET  /api/item?id=&read=1     article detail with blocks
 GET  /api/thumb?id=           cached thumbnail bytes
+GET  /api/discover?url=       feed discovery: {ok, direct, candidates[{url,title,icon,entries,existing}]}
 GET  /api/refresh/status      background refresh progress
 GET  /api/opml                OPML export
 POST /api/feeds               {"url": "...", "folder": "..."}
@@ -114,14 +178,14 @@ POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
 POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
 POST /api/refresh             {} or {"feed": 1}
 POST /api/prefs               {"reader_theme": "sepia", ...}
-POST /api/opml                raw OPML body
+POST /api/opml                {"opml": "<opml>...</opml>"}
 POST /api/extract             {"id": 1} — force re-extraction
 ```
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 24 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 32 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```

@@ -45,6 +45,8 @@ class ApiTests(unittest.TestCase):
 
         self.patch = mock.patch("knewsd.fetch.http_get", side_effect=fake_get)
         self.patch.start()
+        self.icon_patch = mock.patch("knewsd.fetch.cache_image", return_value="")
+        self.icon_patch.start()
         self.server = api_mod.build_server(self.store, "127.0.0.1", 0)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -54,6 +56,7 @@ class ApiTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.patch.stop()
+        self.icon_patch.stop()
         self.store.db.close()
         self.tmp.cleanup()
 
@@ -175,6 +178,48 @@ class ApiTests(unittest.TestCase):
             threading.Event().wait(0.05)
         self.assertFalse(status_body["running"])
         self.assertEqual(status_body["done"], 1)
+
+    def test_discover_direct_feed(self):
+        status, data = self.get("/api/discover?url=example.org/feed.xml")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["direct"])
+        self.assertEqual(data["candidates"][0]["title"], "Test Feed")
+
+    def test_discover_html_page(self):
+        page = b"""<html><head>
+        <link rel="alternate" type="application/rss+xml" href="/feed.xml"/></head>
+        <body>blog</body></html>"""
+
+        def fake_get(url, etag=None, last_modified=None, timeout=20, max_bytes=None):
+            if url.endswith("/feed.xml"):
+                return {"status": 200, "body": FEED, "url": url, "headers": {}}
+            return {"status": 200, "body": page, "url": url, "headers": {}}
+
+        self.patch.stop()
+        with mock.patch("knewsd.fetch.http_get", side_effect=fake_get):
+            status, data = self.get("/api/discover?url=https://blog.example/")
+        self.patch.start()
+        self.assertEqual(status, 200)
+        self.assertFalse(data["direct"])
+        urls = [c["url"] for c in data["candidates"]]
+        self.assertTrue(any(u.endswith("/feed.xml") for u in urls), urls)
+
+    def test_discover_reports_unreachable(self):
+        self.patch.stop()
+        with mock.patch("knewsd.fetch.http_get", side_effect=OSError("boom")):
+            status, data = self.get("/api/discover?url=down.example")
+        self.patch.start()
+        self.assertEqual(status, 200)
+        self.assertFalse(data["ok"])
+        self.assertIn("could not reach", data["message"])
+
+    def test_feed_icon_column_and_state(self):
+        status, data = self.post("/api/feeds", {"url": "https://example.org/feed.xml"})
+        self.assertEqual(status, 200)
+        feed = [f for f in data["state"]["feeds"] if f["url"] == "https://example.org/feed.xml"][0]
+        self.assertIn("icon", feed)
+        self.assertIsInstance(feed["icon"], str)
 
     def test_delete_feed_removes_items(self):
         feed_id = self.add_feed()

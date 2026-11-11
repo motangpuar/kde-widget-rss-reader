@@ -5,13 +5,14 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 import time
 import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from . import feeds as feedmod
 from . import readability
@@ -142,6 +143,124 @@ def cache_image(url: str, timeout: float = 15.0) -> str:
     return target.as_uri()
 
 
+
+# ------------------------------------------------------------------ discovery
+def _normalize_address(address: str) -> str:
+    address = (address or "").strip()
+    if not address:
+        raise FetchError("empty address")
+    if "://" not in address:
+        address = "https://" + address
+    parsed = urlparse(address)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise FetchError(f"not a web address: {address}")
+    return address
+
+
+def discover(address: str, limit: int = 6, timeout: float = 10.0) -> dict[str, Any]:
+    """Resolve an arbitrary address (site, feed, or YouTube style URL) to feeds.
+
+    Returns {"url", "candidates": [{"url", "title", "icon"}], "direct": bool, "message"}.
+    """
+    url = _normalize_address(address)
+    direct_error = ""
+    try:
+        response = http_get(url, timeout=timeout)
+        parsed = feedmod.parse_feed(response["body"], response["url"] or url)
+        resolved = response["url"] or url
+        return {
+            "url": resolved,
+            "direct": True,
+            "message": "",
+            "candidates": [{"url": resolved, "title": parsed["title"] or urlparse(resolved).netloc,
+                            "icon": parsed.get("icon") or ""}],
+        }
+    except Exception as exc:  # noqa: BLE001 - fall through to HTML discovery
+        direct_error = str(exc)
+
+    try:
+        page = http_get(url, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        raise FetchError(f"could not reach {url}: {exc}") from exc
+
+    final = page["url"] or url
+    html_text = page["body"].decode("utf-8", "replace")
+    candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for candidate in feedmod.discover_feed_urls(html_text, final):
+        if len(candidates) >= limit:
+            break
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            probe = http_get(candidate, timeout=timeout)
+            parsed = feedmod.parse_feed(probe["body"], probe["url"] or candidate)
+        except Exception:  # noqa: BLE001 - try the next candidate
+            continue
+        resolved = probe["url"] or candidate
+        if resolved in seen and resolved != candidate:
+            continue
+        seen.add(resolved)
+        candidates.append({
+            "url": resolved,
+            "title": parsed["title"] or urlparse(resolved).netloc,
+            "icon": parsed.get("icon") or "",
+            "entries": len(parsed["entries"]),
+        })
+    message = "" if candidates else f"no feeds found on {final} ({direct_error or 'no candidate parsed'})"
+    return {"url": final, "direct": False, "candidates": candidates, "message": message}
+
+
+def store_feed_icon(store: Store, feed: dict[str, Any], hint: str = "",
+                    deep: bool = False) -> str:
+    """Cache a favicon for the feed and persist the file URI on the row.
+
+    ``deep=False`` only tries the feed's own icon and ``/favicon.ico`` so it can run on
+    the add-feed request path; ``deep=True`` also scans the home page for a link tag.
+    """
+    if feed.get("icon"):
+        return feed["icon"]
+    site = feed.get("site") or ""
+    feed_url = feed.get("url") or ""
+    origin = "{0.scheme}://{0.netloc}".format(urlparse(site or feed_url))
+    attempts: list[str] = []
+    if hint:
+        attempts.append(hint)
+    if feed_url:
+        attempts.append(urljoin(feed_url, "/favicon.ico"))
+    if origin and origin + "/favicon.ico" not in attempts:
+        attempts.append(urljoin(origin, "/favicon.ico"))
+    for candidate in attempts:
+        try:
+            uri = cache_image(candidate, timeout=5)
+        except Exception:  # noqa: BLE001
+            uri = ""
+        if uri:
+            store.update_feed(feed["id"], icon=uri)
+            return uri
+    if not deep:
+        return ""
+    # optional: <link rel="icon"> declared by the site
+    if origin:
+        try:
+            page = http_get(origin + "/", timeout=8)
+        except Exception:  # noqa: BLE001
+            return ""
+        html_text = page["body"].decode("utf-8", "replace")
+        for match in re.finditer(r"<link\b[^>]*>", html_text, re.I):
+            tag = match.group(0)
+            if not re.search(r"rel\s*=\s*[\"']?(?:shortcut )?icon", tag, re.I):
+                continue
+            href = re.search(r"href\s*=\s*[\"']([^\"']+)[\"']", tag, re.I)
+            if not href:
+                continue
+            uri = cache_image(urljoin(origin + "/", href.group(1)), timeout=5)
+            if uri:
+                store.update_feed(feed["id"], icon=uri)
+                return uri
+    return ""
+
 # ---------------------------------------------------------------------- feeds
 def refresh_feed(store: Store, feed: dict[str, Any], max_items: int) -> dict[str, Any]:
     url = feed["url"]
@@ -150,6 +269,11 @@ def refresh_feed(store: Store, feed: dict[str, Any], max_items: int) -> dict[str
     except FetchError as exc:
         store.update_feed(feed["id"], last_fetch=time.time(), last_error=str(exc)[:300])
         return {"feed": feed["title"] or url, "ok": False, "error": str(exc)}
+    if not feed.get("icon"):
+        try:
+            store_feed_icon(store, feed, deep=True)
+        except Exception:  # noqa: BLE001 - icons are cosmetic
+            pass
     if response["status"] == 304:
         store.update_feed(feed["id"], last_fetch=time.time(), last_error=None)
         return {"feed": feed["title"] or url, "ok": True, "new": 0, "not_modified": True}
@@ -217,6 +341,10 @@ def add_feed(store: Store, url: str, folder: str = "", title: str = "") -> dict[
     )
     feed = store.feed(feed_id)
     assert feed is not None
+    try:
+        store_feed_icon(store, feed, parsed.get("icon") or "")
+    except Exception:  # noqa: BLE001 - icons are cosmetic
+        pass
     result = refresh_feed(store, feed, int(store.prefs().get("max_items_per_feed", 300)))
     return {"id": feed_id, "url": resolved, "title": feed["title"], "refresh": result}
 

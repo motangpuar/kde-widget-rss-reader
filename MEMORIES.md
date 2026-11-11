@@ -1,10 +1,11 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
-Shipped v1.0.0: Plasma 6 applet `io.github.infidel.newscurator` + stdlib-only Python daemon
-`knewsd` (SQLite, JSON on 127.0.0.1:8770). Installed and running on the host; widget added to
-the desktop, list/state API traffic confirmed live. Backend 24 unit tests green, all QML
-lint-clean, all five QML components instantiate clean under an offscreen `qml` harness.
+Shipped v1.0.0 + follow-up: Plasma 6 applet `io.github.infidel.newscurator` + stdlib-only Python
+daemon `knewsd` (SQLite, JSON on 127.0.0.1:8770). v1.1 additions: Inoreader-style feed discovery
+(`/api/discover`), OPML file picker, cached source favicons in sidebar + article list.
+Installed and running on the host; discovery and icon backfill verified against the live DB.
+Backend 32 unit tests green; six QML components instantiate clean under the offscreen `qml` harness.
 
 ## Active State
 - Backend committed (`2d4ee45`); plasmoid/scripts/README committed in the follow-up commit.
@@ -37,12 +38,19 @@ lint-clean, all five QML components instantiate clean under an offscreen `qml` h
 
 ## Next Steps
 1. Wire the sidebar delete-feed action (removed from main.qml; feeds are deleted from SettingsSheet).
+1b. Discovery edge cases: YouTube channel pages return 404 to non-JS clients; consider a
+   `youtube.com/channel/UC…` → `feeds/videos.xml?channel_id=` special case.
 2. Optional: prefetch preview mark-read on scroll end (currently only on open).
 3. Ask user whether the accidental `POST /api/mark-all` at 18:32:25 (all 15 LWN items → read)
    should be reverted; no bulk un-read endpoint exists yet.
 4. Consider capping stored `content` HTML per item and pruning old rows (DB growth).
 
 ## Chronological History
+- 2026-11-11: v1.1 — feed discovery (`/api/discover` + `fetch.discover`), feed favicons
+  (`feeds.icon` column + `store_feed_icon`, sidebar + list widget), OPML `FileDialog` import;
+  AddFeedSheet rewritten as a follow dialog. 32 tests, 6 harness screens clean.
+- 2026-11-11: notice banner in main.qml for import results (top-right, 9 s), README corrections
+  around `/api/opml` JSON body.
 - 2026-11-11: backend (feeds/readability/fetch/db/api) + 24 tests; commit `2d4ee45`.
 - 2026-11-11: QML UI (main, FeedSidebar, ArticleList, ReaderView, AddFeedSheet, SettingsSheet),
   Api.js, icons, systemd unit, install/uninstall/dev-reload scripts, README.

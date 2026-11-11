@@ -49,6 +49,30 @@ OPML = """<?xml version="1.0"?><opml version="2.0"><body>
 </body></opml>"""
 
 
+class FeedIconTests(unittest.TestCase):
+    def test_rss_image_url(self):
+        data = b"""<rss version="2.0"><channel><title>T</title>
+        <image><url>/logo.png</url><title>T</title></image>
+        <item><title>a</title><link>https://e.org/a</link></item></channel></rss>"""
+        parsed = feeds.parse_feed(data, "https://e.org/feed.xml")
+        self.assertEqual(parsed["icon"], "https://e.org/logo.png")
+
+    def test_atom_icon_and_logo(self):
+        data = b"""<feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
+        <icon>/i.png</icon><entry><title>x</title><id>1</id></entry></feed>"""
+        parsed = feeds.parse_feed(data, "https://e.org/atom.xml")
+        self.assertEqual(parsed["icon"], "https://e.org/i.png")
+
+    def test_json_feed_icon(self):
+        data = b'{"version":"https://jsonfeed.org/version/1.1","title":"J","icon":"https://e.org/j.png","items":[]}'
+        parsed = feeds.parse_feed(data, "https://e.org/feed.json")
+        self.assertEqual(parsed["icon"], "https://e.org/j.png")
+
+    def test_missing_icon_is_empty(self):
+        parsed = feeds.parse_feed(ATOM, "https://planet.kde.org/")
+        self.assertEqual(parsed["icon"], "")
+
+
 class FeedParseTests(unittest.TestCase):
     def test_rss2(self):
         parsed = feeds.parse_feed(RSS, "https://lwn.net/headlines/rss")

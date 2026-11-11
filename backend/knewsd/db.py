@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS feeds (
     last_modified TEXT,
     last_fetch   REAL NOT NULL DEFAULT 0,
     last_error   TEXT,
+    icon         TEXT NOT NULL DEFAULT '',
     enabled      INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS items (
@@ -61,7 +62,14 @@ class Store:
             self.db.execute("PRAGMA synchronous=NORMAL")
             self.db.execute("PRAGMA foreign_keys=ON")
             self.db.executescript(SCHEMA)
+            self._migrate()
             self.db.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created."""
+        cols = {row[1] for row in self.db.execute("PRAGMA table_info(feeds)")}
+        if "icon" not in cols:
+            self.db.execute("ALTER TABLE feeds ADD COLUMN icon TEXT NOT NULL DEFAULT ''")
 
     # ---------------------------------------------------------------- prefs
     def prefs(self) -> dict[str, Any]:
@@ -125,7 +133,8 @@ class Store:
         return int(row["id"])
 
     def update_feed(self, feed_id: int, **fields: Any) -> None:
-        allowed = {"title", "folder", "site", "etag", "last_modified", "last_fetch", "last_error", "enabled"}
+        allowed = {"title", "folder", "site", "etag", "last_modified", "last_fetch", "last_error",
+                   "enabled", "icon"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return

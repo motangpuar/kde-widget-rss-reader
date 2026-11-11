@@ -55,6 +55,7 @@ Item {
                            "label": grouped[name][j].title || grouped[name][j].url,
                            "count": grouped[name][j].unread || 0,
                            "error": grouped[name][j].last_error || "",
+                           "favicon": grouped[name][j].icon || "",
                            "nested": true })
             }
         }
@@ -63,6 +64,7 @@ Item {
                        "label": loose[l].title || loose[l].url,
                        "count": loose[l].unread || 0,
                        "error": loose[l].last_error || "",
+                       "favicon": loose[l].icon || "",
                        "nested": false })
         }
         return out
@@ -150,9 +152,24 @@ Item {
                     anchors.rightMargin: Kirigami.Units.smallSpacing
                     spacing: Kirigami.Units.smallSpacing
 
+                    Image {
+                        visible: rowItem.modelData.kind === "feed" && rowItem.modelData.favicon
+                                 && status === Image.Ready
+                        source: rowItem.modelData.favicon || ""
+                        sourceSize.width: Kirigami.Units.iconSizes.small
+                        sourceSize.height: Kirigami.Units.iconSizes.small
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                    }
+
                     Kirigami.Icon {
                         visible: rowItem.modelData.kind !== "feed"
-                        source: rowItem.modelData.icon || (rowItem.modelData.kind === "folder" ? "folder" : "")
+                                 || !rowItem.modelData.favicon
+                        source: rowItem.modelData.kind === "feed"
+                                ? "application-rss+xml"
+                                : (rowItem.modelData.icon || "folder")
                         implicitWidth: Kirigami.Units.iconSizes.small
                         implicitHeight: Kirigami.Units.iconSizes.small
                         color: rowItem.active ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor

@@ -200,7 +200,8 @@ def parse_feed(data: bytes | str, base_url: str = "") -> dict:
                 "image": _entry_image(node, content, base),
             }
         )
-    return {"title": strip_html(title), "site": urljoin(base, site or ""), "entries": entries}
+    return {"title": strip_html(title), "site": urljoin(base, site or ""),
+            "icon": _xml_feed_icon(root, base), "entries": entries}
 
 
 def _parse_json_feed(text: str, base_url: str) -> dict:
@@ -221,10 +222,29 @@ def _parse_json_feed(text: str, base_url: str) -> dict:
             }
         )
     return {
+        "icon": urljoin(base_url, doc.get("icon") or doc.get("favicon") or ""),
         "title": strip_html(doc.get("title") or ""),
         "site": doc.get("home_page_url") or base_url,
         "entries": entries,
     }
+
+
+def _xml_feed_icon(root: ET.Element, base_url: str) -> str:
+    """Best-effort feed logo: atom:icon/logo, RSS <image><url>, itunes:image."""
+    for node in root.iter():
+        name = local(node.tag)
+        if name in ("icon", "logo"):
+            value = text_of(node) or node.get("href") or ""
+            if value:
+                return urljoin(base_url, value.strip())
+    for node in root.iter():
+        if local(node.tag) == "image":
+            for sub in node.iter():
+                if local(sub.tag) == "url":
+                    value = text_of(sub)
+                    if value:
+                        return urljoin(base_url, value.strip())
+    return ""
 
 
 def discover_feed_urls(page_html: str, base_url: str) -> list[str]:

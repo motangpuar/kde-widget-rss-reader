@@ -78,6 +78,21 @@ class Api:
             "version": VERSION,
         }
 
+    def discover(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        """Resolve an address typed by the user into candidate feeds."""
+        address = (query.get("url") or [""])[0]
+        known = {feed["url"]: feed["title"] for feed in self.store.feeds()}
+        try:
+            result = fetchmod.discover(address)
+        except fetchmod.FetchError as exc:
+            return {"ok": False, "url": address, "candidates": [], "message": str(exc)}
+        for candidate in result["candidates"]:
+            candidate["existing"] = candidate["url"] in known
+            if candidate["existing"]:
+                candidate["title"] = candidate["title"] or known[candidate["url"]]
+        result["ok"] = True
+        return result
+
     def item_list(self, query: dict[str, list[str]]) -> dict[str, Any]:
         def one(name: str, default: str = "") -> str:
             return (query.get(name) or [default])[0]
@@ -218,6 +233,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._error(404, "no thumbnail")
                 else:
                     self._send(200, result[0], result[1])
+            elif route == "/api/discover":
+                self._send(200, self.api.discover(query))
             elif route == "/api/refresh/status":
                 self._send(200, self.api.refresh.state)
             elif route == "/api/opml":

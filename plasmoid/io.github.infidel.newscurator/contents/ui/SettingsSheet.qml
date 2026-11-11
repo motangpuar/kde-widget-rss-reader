@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents3
 
@@ -18,6 +19,39 @@ Item {
     signal refreshNowRequested()
     signal importOpml(string text)
     signal deleteFeedRequested(int id)
+
+    property string opmlStatus: ""
+
+    function loadOpmlFile(url) {
+        var path = url.toString()
+        opmlStatus = i18n("Reading %1…", path.replace(/^file:\/\//, ""))
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return
+            if (xhr.status !== 0 && xhr.status !== 200) {
+                sheet.opmlStatus = i18n("Could not read that file.")
+                return
+            }
+            var text = xhr.responseText || ""
+            if (text.indexOf("<opml") < 0) {
+                sheet.opmlStatus = i18n("That file is not an OPML export.")
+                return
+            }
+            sheet.opmlStatus = i18n("Importing %1…", path.replace(/^file:\/\//, ""))
+            sheet.importOpml(text)
+        }
+        xhr.open("GET", path)
+        xhr.send()
+    }
+
+    FileDialog {
+        id: opmlDialog
+        title: i18n("Import OPML")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [i18n("OPML exports (*.opml *.xml)"), i18n("All files (*)")]
+        onAccepted: sheet.loadOpmlFile(selectedFile)
+    }
 
     function pref(key, fallback) {
         var value = prefs ? prefs[key] : undefined
@@ -289,14 +323,29 @@ Item {
                             icon.name: "document-export"
                             onClicked: Qt.openUrlExternally("http://127.0.0.1:" + sheet.port + "/api/opml")
                         }
+                        PlasmaComponents3.Button {
+                            text: i18n("Import OPML file…")
+                            icon.name: "document-import"
+                            onClicked: opmlDialog.open()
+                        }
                         Item { Layout.fillWidth: true }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: sheet.opmlStatus.length > 0
+                        text: sheet.opmlStatus
+                        color: Kirigami.Theme.disabledTextColor
+                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                        wrapMode: Text.WordWrap
                     }
 
                     PlasmaComponents3.TextArea {
                         id: opmlArea
                         Layout.fillWidth: true
-                        implicitHeight: Kirigami.Units.gridUnit * 4
-                        placeholderText: i18n("Paste OPML here to import feeds")
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: Kirigami.Units.gridUnit * 3
+                        placeholderText: i18n("…or paste the contents of an OPML file here")
                         wrapMode: TextEdit.Wrap
                         background: Rectangle {
                             color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
@@ -308,13 +357,11 @@ Item {
                         }
                     }
                     PlasmaComponents3.Button {
-                        text: i18n("Import OPML")
+                        text: i18n("Import pasted OPML")
                         icon.name: "document-import"
                         enabled: opmlArea.text.length > 0
                         onClicked: sheet.importOpml(opmlArea.text)
                     }
-
-                    Item { Layout.fillHeight: true; implicitHeight: Kirigami.Units.gridUnit }
                 }
             }
         }

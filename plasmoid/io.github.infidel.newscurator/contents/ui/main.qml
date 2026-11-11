@@ -31,6 +31,7 @@ PlasmoidItem {
     property bool readerOpen: false
     property bool backendUp: false
     property string statusMessage: ""
+    property string notice: ""
     property bool refreshRunning: false
     property bool showSidebar: true
     property bool addFeedOpen: false
@@ -61,6 +62,12 @@ PlasmoidItem {
     onBackendPortChanged: {
         Api.setPort(backendPort)
         loadState()
+    }
+
+    Timer {
+        id: noticeTimer
+        interval: 9000
+        onTriggered: root.notice = ""
     }
 
     Timer {
@@ -340,11 +347,44 @@ PlasmoidItem {
         })
     }
 
+    function feedIcon(feedId) {
+        for (var i = 0; i < feeds.length; ++i) {
+            if (feeds[i].id === feedId)
+                return feeds[i].icon || ""
+        }
+        return ""
+    }
+
+    function showNotice(text) {
+        notice = text || ""
+        if (notice.length > 0)
+            noticeTimer.restart()
+    }
+
     function importOpml(text) {
         settingsOpen = false
         Api.request("POST", "/api/opml", { "opml": text }, function (status, data) {
-            if (status === 200)
-                loadState(true)
+            if (status !== 200 || !data) {
+                showNotice(i18n("OPML import failed. Check the file and try again."))
+                return
+            }
+            var entries = data.imported || []
+            var ok = 0
+            var failures = []
+            for (var i = 0; i < entries.length; i++) {
+                if (entries[i].error)
+                    failures.push(entries[i].url)
+                else
+                    ok++
+            }
+            if (failures.length === 0) {
+                showNotice(i18n("Imported %1 feeds.", ok))
+            } else {
+                showNotice(i18np("Imported %1 feed. Failed: ", "Imported %1 feeds. Failed: ", ok)
+                           .arg(ok) + failures.slice(0, 3).join(", ")
+                           + (failures.length > 3 ? i18n(" and %1 more", failures.length - 3) : ""))
+            }
+            loadState(true)
         })
     }
 
@@ -456,6 +496,7 @@ PlasmoidItem {
                 statusMessage: root.statusMessage
                 selectionTitle: root.selectedTitle()
                 thumbBase: "http://127.0.0.1:" + root.backendPort + "/api/thumb?id="
+                iconFor: (feedId) => root.feedIcon(feedId)
                 sidebarVisible: sidebar.visible
                 onItemActivated: (id) => root.openItem(id)
                 onStarToggled: (id, starred) => root.toggleStar(id, starred)
@@ -527,6 +568,39 @@ PlasmoidItem {
             onPortEdited: (value) => Plasmoid.configuration.port = value
             onRefreshNowRequested: root.startRefresh()
             onImportOpml: (text) => root.importOpml(text)
+        }
+
+        Rectangle {
+            id: noticeBar
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: Kirigami.Units.smallSpacing
+            width: Math.min(parent.width - 2 * Kirigami.Units.smallSpacing,
+                            noticeText.implicitWidth + Kirigami.Units.gridUnit * 2.5)
+            height: noticeText.implicitHeight + Kirigami.Units.smallSpacing * 2
+            radius: Kirigami.Units.smallSpacing
+            color: Kirigami.Theme.backgroundColor
+            border.width: 1
+            border.color: Kirigami.Theme.textColor
+            opacity: root.notice.length > 0 ? 0.97 : 0
+            visible: opacity > 0
+
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+            Text {
+                id: noticeText
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Kirigami.Units.smallSpacing * 2
+                anchors.rightMargin: Kirigami.Units.smallSpacing * 2
+                text: root.notice
+                color: Kirigami.Theme.textColor
+                wrapMode: Text.Wrap
+                maximumLineCount: 4
+                elide: Text.ElideRight
+                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.75)
+            }
         }
     }
 }

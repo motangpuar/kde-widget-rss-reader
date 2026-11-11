@@ -17,6 +17,11 @@ Item {
     property string searchText: ""
     property bool backendUp: true
     property string statusMessage: ""
+    property var iconFor: null
+
+    function feedIcon(feedId) {
+        return iconFor ? (iconFor(feedId) || "") : ""
+    }
     property string selectionTitle: ""
     property string thumbBase: ""
     property bool sidebarVisible: true
@@ -206,6 +211,7 @@ Item {
                     height: cardLayout.implicitHeight + Kirigami.Units.smallSpacing * 2
                     readonly property bool current: modelData.id === listRoot.currentItemId
                     readonly property bool unread: modelData.read === 0
+                    readonly property string favicon: listRoot.feedIcon(modelData.feed_id)
 
                     Rectangle {
                         anchors.fill: parent
@@ -255,18 +261,34 @@ Item {
                                 elide: Text.ElideRight
                             }
 
-                            Text {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: {
-                                    var parts = [card.modelData.feed_title]
-                                    if (card.modelData.author)
-                                        parts.push(card.modelData.author)
-                                    parts.push(Api.relativeTime(card.modelData.published))
-                                    return parts.filter(function (p) { return !!p }).join(" · ")
+                                spacing: Math.round(Kirigami.Units.smallSpacing * 0.6)
+
+                                Image {
+                                    visible: status === Image.Ready
+                                    source: card.favicon
+                                    sourceSize.width: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                    sourceSize.height: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                    Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                    Layout.preferredHeight: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
                                 }
-                                color: Kirigami.Theme.disabledTextColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.66)
-                                elide: Text.ElideRight
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: {
+                                        var parts = [card.modelData.feed_title]
+                                        if (card.modelData.author)
+                                            parts.push(card.modelData.author)
+                                        parts.push(Api.relativeTime(card.modelData.published))
+                                        return parts.filter(function (p) { return !!p }).join(" · ")
+                                    }
+                                    color: Kirigami.Theme.disabledTextColor
+                                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.66)
+                                    elide: Text.ElideRight
+                                }
                             }
 
                             Text {
