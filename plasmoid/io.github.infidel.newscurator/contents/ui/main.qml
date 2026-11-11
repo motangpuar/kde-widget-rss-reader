@@ -642,12 +642,14 @@ PlasmoidItem {
                 lineHeightPercent: root.prefs.line_height || 160
                 paddingPercent: root.readerPadding
                 themeName: root.readerTheme
+                prefs: root.prefs
                 compactMode: root.compactUi
                 feedTitle: root.article ? (root.article.feed_title || "") : ""
                 onClosed: root.readerOpen = false
                 onStarToggled: (id, starred) => root.toggleStar(id, starred)
                 onOpenExternal: (url) => Qt.openUrlExternally(url)
                 onReextractRequested: root.reextractCurrent()
+                onPrefsEdited: (values) => root.setPrefs(values)
                 onFontScaleChanged: (delta) => root.setPref("font_scale",
                     Math.max(80, Math.min(170, root.fontScale + delta)))
                 onThemeCycled: {

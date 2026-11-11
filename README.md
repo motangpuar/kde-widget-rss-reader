@@ -63,12 +63,14 @@ Uninstall (keeps your feeds and read state):
 | Read an article | click a row — opens the built-in reader |
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
-| Browse by folder or source | `view-list-details` icon in the header menu: smart views, folders, feeds |
+| Browse by folder or source | the title button in the list header (`view-list-details` icon) opens the scope menu: smart views, folders, feeds |
 | Show/hide the feed sidebar | `view-split-left-right` icon in the header |
 | Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
 | Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
 | Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
+| Select feeds in bulk | tick the checkbox at the start of a row; the toolbar reports *N selected* |
+| Move feeds | in *Settings → Feeds*, tick one or more rows and press **Move**, or drag a row's handle onto a folder header |
 | Settings | gear icon: content typography (theme, font, size, spacing, margins), refresh interval, bulk add, feed removal, OPML |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
@@ -78,7 +80,9 @@ Content settings under *Settings → Content* are dropdowns, and every one of th
 stored preference: theme (`reader_theme`), font (`font_family` + `serif`), text size
 (`font_scale`, 80–160 %), line spacing (`line_height`) and side margins (`reader_padding`,
 60–180 %). The font list is filtered against `Qt.fontFamilies()`, so a family that is not
-installed never appears.
+installed never appears. The same five settings are also available while reading, from the
+`format-text` menu in the reader toolbar; both surfaces write the same preferences through
+`Typography.js`, so they cannot drift.
 
 ### Following a site
 
@@ -177,10 +181,11 @@ plasmoid/io.github.infidel.newscurator/   Plasma applet (QML only)
   contents/ui/main.qml                    PlasmoidItem, state + API orchestration
   contents/ui/FeedSidebar.qml             feed/folder tree with unread counts
   contents/ui/ArticleList.qml             list, filters, search, infinite scroll
-  contents/ui/ReaderView.qml              block renderer + typography controls
+  contents/ui/ReaderView.qml              block renderer + in-reader typography menu
   contents/ui/AddFeedSheet.qml            add-feed overlay
   contents/ui/SettingsSheet.qml           preferences, feed management, OPML
   contents/ui/Api.js                      HTTP client, formatting helpers
+  contents/ui/Typography.js               shared theme/font/size tables (reader + settings)
 backend/knewsd/                           Python daemon (stdlib only)
   feeds.py                                RSS/Atom/JSON parsing, OPML
   readability.py                          DOM pruning + block extraction
@@ -225,6 +230,7 @@ GET  /api/opml                OPML export
 POST /api/feeds               {"url": "...", "folder": "..."}
 POST /api/feeds/delete        {"id": 1}
 POST /api/feeds/update        {"id": 1, "title": "...", "folder": "...", "enabled": 1}
+POST /api/feeds/move          {"ids": [1, 2], "folder": "Tech"} → {"ok", "moved", "folder", "state"}
 POST /api/feeds/update        {"id": 1, "url": "https://..."} — re-probes, then retargets
 POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
 POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
@@ -238,7 +244,7 @@ POST /api/extract             {"id": 1} — force re-extraction
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 44 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 45 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```

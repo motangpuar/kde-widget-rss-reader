@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents3
+import "Typography.js" as Typography
 import "Api.js" as Api
 
 Item {
@@ -45,36 +46,110 @@ Item {
         return value === undefined || value === null ? fallback : value
     }
 
-    // Index of the entry whose `key` matches value, so a ComboBox can show the stored pref.
-    function indexOf(entries, key, value) {
-        for (var i = 0; i < entries.length; ++i)
-            if (entries[i][key] === value)
-                return i
-        return 0
+    readonly property var fonts: Typography.fontChoices(Qt.fontFamilies())
+    // Checkbox multi-select for bulk folder moves; a plain object because ids are sparse.
+    property var checkedIds: ({})
+    readonly property int checkedCount: countChecked()
+    readonly property var folderModel: buildFolderModel()
+
+    function countChecked() {
+        var total = 0
+        for (var key in checkedIds)
+            if (checkedIds[key])
+                ++total
+        return total
     }
 
-    // Curated families that are actually installed, so the list never offers a dead font.
-    function fontChoices() {
-        var wanted = ["Noto Serif", "Noto Sans", "Liberation Serif", "Liberation Sans",
-                      "Adwaita Sans", "Cantarell", "DejaVu Serif", "DejaVu Sans",
-                      "Source Serif 4", "Latin Modern Roman", "Georgia"]
-        var installed = Qt.fontFamilies()
-        var out = [{ "label": i18n("System sans"), "family": "", "serif": 0 },
-                   { "label": i18n("System serif"), "family": "", "serif": 1 }]
-        for (var i = 0; i < wanted.length; ++i)
-            if (installed.indexOf(wanted[i]) >= 0)
-                out.push({ "label": wanted[i], "family": wanted[i], "serif": 0 })
+    function feedLabelById(id) {
+        for (var i = 0; i < feeds.length; ++i)
+            if (feeds[i].id === id)
+                return feedLabel(feeds[i])
+        return i18n("feed")
+    }
+
+    function checkedList() {
+        var out = []
+        for (var key in checkedIds)
+            if (checkedIds[key])
+                out.push(Number(key))
         return out
     }
 
-    function fontIndex() {
-        var choices = fontChoices()
-        var family = pref("font_family", "")
-        var serif = (pref("serif", 0) | 0) === 1
-        for (var i = 0; i < choices.length; ++i)
-            if (choices[i].family === family && choices[i].serif === (family.length > 0 ? 0 : serif))
-                return i
-        return 0
+    function isChecked(id) {
+        return checkedIds[String(id)] === true
+    }
+
+    function setChecked(id, on) {
+        var next = {}
+        for (var key in checkedIds)
+            next[key] = checkedIds[key]
+        if (on)
+            next[String(id)] = true
+        else
+            delete next[String(id)]
+        checkedIds = next
+    }
+
+    function folderAt(index, model) {
+        if (index <= 0 || !model)
+            return ""
+        return String(model[index])
+    }
+
+    function clearChecked() {
+        checkedIds = ({})
+    }
+
+    // "No folder" first, then the folders that actually exist, so a move can empty one.
+    function buildFolderModel() {
+        var out = [i18n("No folder")]
+        var names = []
+        for (var i = 0; i < feeds.length; ++i) {
+            var name = feeds[i].folder || ""
+            if (name.length > 0 && names.indexOf(name) < 0)
+                names.push(name)
+        }
+        names.sort()
+        return out.concat(names)
+    }
+
+    function moveChecked(folder) {
+        var ids = checkedList()
+        if (ids.length === 0)
+            return
+        feedStatus = ids.length === 1 ? i18n("Moving 1 feed…")
+                                      : i18n("Moving %1 feeds…", ids.length)
+        feedStatusIsError = false
+        Api.request("POST", "/api/feeds/move", { "ids": ids, "folder": folder },
+                    function (status, data) {
+            if (status !== 200 || !data) {
+                sheet.feedStatus = i18n("Could not move those feeds.")
+                sheet.feedStatusIsError = true
+                return
+            }
+            sheet.feedStatus = data.moved === 1 ? i18n("Moved 1 feed.")
+                                                : i18n("Moved %1 feeds.", data.moved)
+            sheet.feedStatusIsError = false
+            sheet.clearChecked()
+            sheet.subscriptionsChanged()
+        })
+    }
+
+    // Drag-and-drop entry point: one feed id dropped on a folder header.
+    function moveOne(id, folder) {
+        Api.request("POST", "/api/feeds/move", { "ids": [id], "folder": folder },
+                    function (status, data) {
+            if (status !== 200 || !data) {
+                sheet.feedStatus = i18n("Could not move that feed.")
+                sheet.feedStatusIsError = true
+                return
+            }
+            sheet.feedStatus = folder.length > 0
+                    ? i18n("Moved %1 to %2", sheet.feedLabelById(id), folder)
+                    : i18n("Moved %1 out of its folder", sheet.feedLabelById(id))
+            sheet.feedStatusIsError = false
+            sheet.subscriptionsChanged()
+        })
     }
 
     function favicon(feed) {
@@ -405,13 +480,10 @@ Item {
                             }
                             PlasmaComponents3.ComboBox {
                                 Layout.fillWidth: true
-                                model: [{ "value": "auto", "label": i18n("Follow Plasma") },
-                                        { "value": "light", "label": i18n("Light") },
-                                        { "value": "sepia", "label": i18n("Sepia") },
-                                        { "value": "dark", "label": i18n("Dark") }]
+                                model: Typography.THEMES
                                 textRole: "label"
-                                currentIndex: sheet.indexOf(model, "value",
-                                                            sheet.pref("reader_theme", "auto"))
+                                currentIndex: Typography.indexOfValue(Typography.THEMES,
+                                                                      sheet.pref("reader_theme", "auto"))
                                 onActivated: (index) => sheet.prefChanged("reader_theme",
                                                                           model[index].value)
                             }
@@ -422,16 +494,14 @@ Item {
                                 font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
                             }
                             PlasmaComponents3.ComboBox {
+                                id: fontBox
                                 Layout.fillWidth: true
-                                model: sheet.fontChoices()
+                                model: sheet.fonts
                                 textRole: "label"
-                                currentIndex: sheet.fontIndex()
-                                onActivated: (index) => {
-                                    var choice = model[index]
-                                    // Family and the sans/serif flag travel together.
-                                    sheet.prefsPatched({ "font_family": choice.family,
-                                                         "serif": choice.serif })
-                                }
+                                currentIndex: Typography.fontIndex(model, sheet.pref("font_family", ""),
+                                                                   sheet.pref("serif", 0))
+                                onActivated: (index) => sheet.prefsPatched(
+                                    Typography.patchForFont(model[index]))
                             }
 
                             Text {
@@ -441,8 +511,8 @@ Item {
                             }
                             PlasmaComponents3.ComboBox {
                                 Layout.fillWidth: true
-                                model: [80, 100, 115, 130, 145, 160]
-                                currentIndex: Math.max(0, model.indexOf(sheet.pref("font_scale", 100)))
+                                model: Typography.SIZES
+                                currentIndex: Typography.indexOfSize(sheet.pref("font_scale", 100))
                                 onActivated: (index) => sheet.prefChanged("font_scale", model[index])
                                 displayText: sheet.pref("font_scale", 100) + "%"
                             }
@@ -454,13 +524,10 @@ Item {
                             }
                             PlasmaComponents3.ComboBox {
                                 Layout.fillWidth: true
-                                model: [{ "value": 140, "label": i18n("Tight") },
-                                        { "value": 160, "label": i18n("Normal") },
-                                        { "value": 180, "label": i18n("Relaxed") },
-                                        { "value": 200, "label": i18n("Airy") }]
+                                model: Typography.SPACING
                                 textRole: "label"
-                                currentIndex: sheet.indexOf(model, "value",
-                                                            sheet.pref("line_height", 160))
+                                currentIndex: Typography.indexOfValue(Typography.SPACING,
+                                                                      sheet.pref("line_height", 160))
                                 onActivated: (index) => sheet.prefChanged("line_height",
                                                                           model[index].value)
                             }
@@ -472,13 +539,10 @@ Item {
                             }
                             PlasmaComponents3.ComboBox {
                                 Layout.fillWidth: true
-                                model: [{ "value": 60, "label": i18n("Narrow") },
-                                        { "value": 100, "label": i18n("Comfortable") },
-                                        { "value": 140, "label": i18n("Wide") },
-                                        { "value": 180, "label": i18n("Extra wide") }]
+                                model: Typography.MARGINS
                                 textRole: "label"
-                                currentIndex: sheet.indexOf(model, "value",
-                                                            sheet.pref("reader_padding", 100))
+                                currentIndex: Typography.indexOfValue(Typography.MARGINS,
+                                                                      sheet.pref("reader_padding", 100))
                                 onActivated: (index) => sheet.prefChanged("reader_padding",
                                                                           model[index].value)
                             }
@@ -495,8 +559,6 @@ Item {
                         PlasmaComponents3.CheckBox {
                             text: i18n("Mark read when opened")
                             checked: sheet.pref("auto_mark_read", 1) === 1
-                            // toggled (not clicked) so the handler only fires on a real change
-                            // and the checked binding is restored afterwards.
                             onToggled: sheet.prefChanged("auto_mark_read", checked ? 1 : 0)
                         }
                         PlasmaComponents3.CheckBox {
@@ -511,6 +573,40 @@ Item {
                         title: i18n("Feeds")
                         summary: i18n("%1 subscriptions", sheet.feeds.length)
 
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.bottomMargin: Kirigami.Units.smallSpacing / 2
+                            spacing: Kirigami.Units.smallSpacing
+                            visible: sheet.checkedCount > 0
+
+                            Text {
+                                text: sheet.checkedCount === 1
+                                      ? i18n("1 selected")
+                                      : i18n("%1 selected", sheet.checkedCount)
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                            }
+                            PlasmaComponents3.ComboBox {
+                                id: moveTarget
+                                Layout.fillWidth: true
+                                // Index 0 is the empty folder, so "move" can also unfile a feed.
+                                model: sheet.folderModel
+                                currentIndex: 0
+                            }
+                            PlasmaComponents3.Button {
+                                text: i18n("Move")
+                                icon.name: "edit-move"
+                                onClicked: sheet.moveChecked(
+                                    sheet.folderAt(moveTarget.currentIndex, moveTarget.model))
+                            }
+                            PlasmaComponents3.ToolButton {
+                                icon.name: "edit-clear"
+                                display: AbstractButton.IconOnly
+                                onClicked: sheet.clearChecked()
+                                PlasmaComponents3.ToolTip { text: i18n("Clear the selection") }
+                            }
+                        }
+
                         Repeater {
                             model: sheet.feedGroups
                             delegate: ColumnLayout {
@@ -519,10 +615,24 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.smallSpacing / 2
 
-                                RowLayout {
+                                // Folder headers double as drop targets for dragged feeds.
+                                Rectangle {
                                     Layout.fillWidth: true
                                     Layout.topMargin: Kirigami.Units.smallSpacing / 2
-                                    spacing: Kirigami.Units.smallSpacing
+                                    implicitHeight: headerRow.implicitHeight + Kirigami.Units.smallSpacing / 2
+                                    radius: Kirigami.Units.smallSpacing / 2
+                                    color: headerDrop.containsDrag
+                                           ? Qt.rgba(Kirigami.Theme.highlightColor.r,
+                                                     Kirigami.Theme.highlightColor.g,
+                                                     Kirigami.Theme.highlightColor.b, 0.25)
+                                           : "transparent"
+
+                                    RowLayout {
+                                        id: headerRow
+                                        anchors.fill: parent
+                                        anchors.leftMargin: Kirigami.Units.smallSpacing / 2
+                                        anchors.rightMargin: Kirigami.Units.smallSpacing / 2
+                                        spacing: Kirigami.Units.smallSpacing
                                     Kirigami.Icon {
                                         source: "folder"
                                         implicitWidth: Kirigami.Units.iconSizes.small
@@ -552,6 +662,17 @@ Item {
                                                   : i18n("Add a feed without a folder")
                                         }
                                     }
+                                    }
+
+                                    DropArea {
+                                        id: headerDrop
+                                        anchors.fill: parent
+                                        keys: ["text/plain"]
+                                        onDropped: (drop) => {
+                                            drop.acceptProposedAction()
+                                            sheet.moveOne(Number(drop.text), group.modelData.name)
+                                        }
+                                    }
                                 }
 
                                 Repeater {
@@ -570,6 +691,15 @@ Item {
                                             Layout.fillWidth: true
                                             spacing: Kirigami.Units.smallSpacing
 
+                                            PlasmaComponents3.CheckBox {
+                                                id: feedCheck
+                                                objectName: "feed-check"
+                                                Layout.alignment: Qt.AlignVCenter
+                                                checked: sheet.isChecked(feedCard.modelData.id)
+                                                onToggled: sheet.setChecked(feedCard.modelData.id,
+                                                                            checked)
+                                            }
+
                                             Image {
                                                 id: feedIcon
                                                 source: sheet.favicon(feedCard.modelData)
@@ -585,6 +715,44 @@ Item {
                                                 implicitWidth: Kirigami.Units.iconSizes.small
                                                 implicitHeight: Kirigami.Units.iconSizes.small
                                                 opacity: 0.8
+                                            }
+
+                                            // Drag handle: dropping the row on a folder header moves it.
+                                            Kirigami.Icon {
+                                                id: dragHandle
+                                                source: "transform-move"
+                                                implicitWidth: Kirigami.Units.iconSizes.small
+                                                implicitHeight: Kirigami.Units.iconSizes.small
+                                                opacity: dragMouse.drag.active ? 1 : 0.45
+                                                Layout.alignment: Qt.AlignVCenter
+
+                                                MouseArea {
+                                                    id: dragMouse
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.OpenHandCursor
+                                                    drag.target: dragGhost
+                                                    drag.axis: Drag.YAxis
+                                                }
+                                            }
+                                            Rectangle {
+                                                id: dragGhost
+                                                width: feedCard.width
+                                                height: Kirigami.Units.gridUnit * 1.6
+                                                visible: dragMouse.drag.active
+                                                z: 50
+                                                radius: Kirigami.Units.smallSpacing / 2
+                                                color: Kirigami.Theme.highlightColor
+                                                opacity: 0.9
+                                                Drag.active: dragMouse.drag.active
+                                                Drag.mimeData: ({ "text/plain": String(feedCard.modelData.id) })
+                                                Drag.hotSpot.x: width / 2
+                                                Drag.hotSpot.y: height / 2
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: sheet.feedLabel(feedCard.modelData)
+                                                    color: Kirigami.Theme.highlightedTextColor
+                                                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                                                }
                                             }
 
                                             ColumnLayout {

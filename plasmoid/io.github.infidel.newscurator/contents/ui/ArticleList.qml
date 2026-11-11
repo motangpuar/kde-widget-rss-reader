@@ -69,12 +69,16 @@ Item {
                     }
                 }
 
+                // The current scope doubles as the filter control, so the way to change what the
+                // list shows is visible instead of hidden behind an unlabelled icon.
                 PlasmaComponents3.ToolButton {
                     id: sourceButton
+                    Layout.fillWidth: true
+                    text: listRoot.selectionTitle
                     icon.name: "view-list-details"
-                    display: AbstractButton.IconOnly
+                    display: AbstractButton.TextBesideIcon
                     onClicked: sourceMenu.popup()
-                    PlasmaComponents3.ToolTip { text: i18n("Browse by folder or source") }
+                    PlasmaComponents3.ToolTip { text: i18n("Filter by folder or source") }
 
                     PlasmaComponents3.Menu {
                         id: sourceMenu
@@ -126,15 +130,6 @@ Item {
                             }
                         }
                     }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: listRoot.selectionTitle
-                    color: Kirigami.Theme.textColor
-                    font.bold: true
-                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.95)
-                    elide: Text.ElideRight
                 }
 
                 Text {

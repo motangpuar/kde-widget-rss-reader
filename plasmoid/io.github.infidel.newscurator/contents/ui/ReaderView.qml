@@ -4,6 +4,7 @@ import QtQuick.Controls
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents3
 import "Api.js" as Api
+import "Typography.js" as Typography
 
 Item {
     id: reader
@@ -20,6 +21,10 @@ Item {
     property string themeName: "auto"
     property bool compactMode: false
     property string feedTitle: ""
+    // Reader typography is edited from the toolbar menu and written to the same prefs as the
+    // settings sheet, so neither surface can drift.
+    property var prefs: ({})
+    readonly property var fonts: Typography.fontChoices(Qt.fontFamilies())
 
     signal closed()
     signal starToggled(int id, bool starred)
@@ -27,6 +32,7 @@ Item {
     signal reextractRequested()
     signal fontScaleChanged(int delta)
     signal themeCycled()
+    signal prefsEdited(var values)
 
     readonly property real maxTextWidth: Math.min(Math.max(width - Kirigami.Units.gridUnit * 3, 200),
                                                   Kirigami.Units.gridUnit * 34)
@@ -126,6 +132,90 @@ Item {
                 PlasmaComponents3.ToolTip { text: i18n("Reading theme (%1)", reader.themeName) }
             }
             PlasmaComponents3.ToolButton {
+                id: lookButton
+                icon.name: "format-text"
+                display: AbstractButton.IconOnly
+                onClicked: lookMenu.popup()
+                PlasmaComponents3.ToolTip { text: i18n("Text appearance") }
+
+                PlasmaComponents3.Menu {
+                    id: lookMenu
+                    y: lookButton.height
+
+                    PlasmaComponents3.Menu {
+                        title: i18n("Theme")
+                        Repeater {
+                            model: Typography.THEMES
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: i18n(modelData.label)
+                                icon.name: (reader.prefs.reader_theme || "auto") === modelData.value
+                                           ? "checkmark" : ""
+                                onTriggered: reader.prefsEdited({ "reader_theme": modelData.value })
+                            }
+                        }
+                    }
+
+                    PlasmaComponents3.Menu {
+                        title: i18n("Font")
+                        Repeater {
+                            model: reader.fonts
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: modelData.family.length > 0 ? modelData.family : i18n(modelData.label)
+                                icon.name: Typography.isFontSelected(modelData,
+                                                                     reader.prefs.font_family || "",
+                                                                     reader.prefs.serif || 0)
+                                           ? "checkmark" : ""
+                                onTriggered: reader.prefsEdited(Typography.patchForFont(modelData))
+                            }
+                        }
+                    }
+
+                    PlasmaComponents3.Menu {
+                        title: i18n("Size (%1%)", reader.prefs.font_scale || 100)
+                        Repeater {
+                            model: Typography.SIZES
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property int modelData
+                                text: modelData + "%"
+                                icon.name: (reader.prefs.font_scale || 100) === modelData
+                                           ? "checkmark" : ""
+                                onTriggered: reader.prefsEdited({ "font_scale": modelData })
+                            }
+                        }
+                    }
+
+                    PlasmaComponents3.Menu {
+                        title: i18n("Line spacing")
+                        Repeater {
+                            model: Typography.SPACING
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: i18n(modelData.label)
+                                icon.name: (reader.prefs.line_height || 160) === modelData.value
+                                           ? "checkmark" : ""
+                                onTriggered: reader.prefsEdited({ "line_height": modelData.value })
+                            }
+                        }
+                    }
+
+                    PlasmaComponents3.Menu {
+                        title: i18n("Margins")
+                        Repeater {
+                            model: Typography.MARGINS
+                            delegate: PlasmaComponents3.MenuItem {
+                                required property var modelData
+                                text: i18n(modelData.label)
+                                icon.name: (reader.prefs.reader_padding || 100) === modelData.value
+                                           ? "checkmark" : ""
+                                onTriggered: reader.prefsEdited({ "reader_padding": modelData.value })
+                            }
+                        }
+                    }
+                }
+            }
+            PlasmaComponents3.ToolButton {
                 icon.name: "internet-services"
                 display: AbstractButton.IconOnly
                 enabled: !!reader.article && !!reader.article.url
@@ -161,7 +251,7 @@ Item {
                 x: reader.sidePadding
                 y: Kirigami.Units.gridUnit * 1.5
                 width: reader.columnWidth
-                spacing: Math.round(reader.bodyFontSize * 0.95)
+                spacing: Math.round(reader.bodyFontSize * 0.95 * reader.lineHeightPercent / 160)
 
                 Text {
                     Layout.fillWidth: true
