@@ -149,6 +149,20 @@ class Store:
                 raise
             self.db.commit()
 
+    def move_feeds(self, ids: list[int], folder: str) -> int:
+        """Move several feeds into one folder in a single statement; returns rows touched."""
+        wanted = [int(i) for i in ids if int(i) > 0]
+        if not wanted:
+            return 0
+        placeholders = ", ".join("?" for _ in wanted)
+        with self._lock:
+            cur = self.db.execute(
+                f"UPDATE feeds SET folder = ? WHERE id IN ({placeholders})",
+                (str(folder or ""), *wanted),
+            )
+            self.db.commit()
+        return int(cur.rowcount or 0)
+
     def delete_feed(self, feed_id: int) -> None:
         with self._lock:
             self.db.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))

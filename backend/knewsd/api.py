@@ -353,6 +353,27 @@ class Handler(BaseHTTPRequestHandler):
                                  "added": len([r for r in results if r["ok"]]),
                                  "results": results,
                                  "state": self.api.state()})
+            elif route == "/api/feeds/move":
+                ids = body.get("ids")
+                if not isinstance(ids, list):
+                    self._send(400, {"error": "ids must be a list"})
+                    return
+                folder = str(body.get("folder") or "").strip()
+                cleaned = []
+                for raw in ids:
+                    try:
+                        cleaned.append(int(raw))
+                    except (TypeError, ValueError):
+                        self._send(400, {"error": "ids must be integers"})
+                        return
+                known = {f["id"] for f in store.feeds()}
+                missing = [i for i in cleaned if i not in known]
+                if missing:
+                    self._send(404, {"error": f"no such feed: {missing[0]}"})
+                    return
+                moved = store.move_feeds(cleaned, folder)
+                self._send(200, {"ok": True, "moved": moved, "folder": folder,
+                                 "state": self.api.state()})
             elif route == "/api/feeds/delete":
                 store.delete_feed(int(body.get("id") or 0))
                 self._send(200, self.api.state())

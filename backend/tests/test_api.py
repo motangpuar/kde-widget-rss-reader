@@ -86,8 +86,8 @@ class ApiTests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read() or b"{}")
 
-    def add_feed(self):
-        status, body = self.post("/api/feeds", {"url": "https://example.org/feed.xml", "folder": "Tech"})
+    def add_feed(self, url="https://example.org/feed.xml", folder="Tech"):
+        status, body = self.post("/api/feeds", {"url": url, "folder": folder})
         self.assertEqual(status, 200, body)
         return body["feed"]["id"]
 
@@ -282,6 +282,32 @@ class ApiTests(unittest.TestCase):
         status, body = self.post("/api/mark-unread", {"feed": feed_id})
         self.assertEqual(status, 200)
         self.assertEqual(body["changed"], 0)
+
+    def test_feeds_move_bulk_and_validation(self):
+        self.add_feed("https://a.example/rss", "One")
+        self.add_feed("https://b.example/rss", "Two")
+        _, state = self.get("/api/state")
+        ids = [f["id"] for f in state["feeds"]]
+        self.assertEqual(len(ids), 2)
+
+        status, body = self.post("/api/feeds/move", {"ids": ids, "folder": "Moved"})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["moved"], 2)
+        self.assertEqual(body["folder"], "Moved")
+        self.assertEqual(sorted(f["folder"] for f in body["state"]["feeds"]), ["Moved", "Moved"])
+
+        # An empty folder is how the UI spells "no folder".
+        status, body = self.post("/api/feeds/move", {"ids": [ids[0]], "folder": ""})
+        self.assertEqual(body["moved"], 1)
+        self.assertIn("", [f["folder"] for f in body["state"]["feeds"]])
+
+        status, body = self.post("/api/feeds/move", {"ids": "1", "folder": "x"})
+        self.assertEqual(status, 400)
+        self.assertIn("ids must be a list", body["error"])
+
+        status, body = self.post("/api/feeds/move", {"ids": [9999], "folder": "x"})
+        self.assertEqual(status, 404)
+        self.assertIn("no such feed", body["error"])
 
     def test_mark_unread_by_ids_and_scope_validation(self):
         feed_id = self.add_feed()
