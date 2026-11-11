@@ -39,6 +39,29 @@ Item {
 
     readonly property int gutter: Kirigami.Units.gridUnit
 
+    // Plasma's default checkmark is drawn from the desktop theme and does not always show a
+    // visible change here, so the indicator is drawn with two Breeze symbolic icons instead: the
+    // box is always visible and the checkmark appears while the box is ticked.
+    component ToggleBox: PlasmaComponents3.CheckBox {
+        id: box
+
+        indicator: Item {
+            implicitWidth: Kirigami.Units.iconSizes.smallMedium
+            implicitHeight: implicitWidth
+
+            Kirigami.Icon {
+                anchors.fill: parent
+                source: "checkbox-symbolic"
+            }
+            Kirigami.Icon {
+                anchors.fill: parent
+                visible: box.checked
+                source: "checkmark-symbolic"
+            }
+        }
+    }
+
+
     // ---------------------------------------------------------------- helpers
     function pref(key, fallback) {
         var value = prefs ? prefs[key] : undefined
@@ -392,12 +415,12 @@ Item {
                         title: i18n("Reading")
                         summary: i18n("what happens when you open an article")
 
-                        PlasmaComponents3.CheckBox {
+                        ToggleBox {
                             text: i18n("Mark read when opened")
                             checked: sheet.pref("auto_mark_read", 1) === 1
                             onToggled: sheet.prefChanged("auto_mark_read", checked ? 1 : 0)
                         }
-                        PlasmaComponents3.CheckBox {
+                        ToggleBox {
                             text: i18n("Open articles in the system browser instead")
                             checked: sheet.pref("open_external", 0) === 1
                             onToggled: sheet.prefChanged("open_external", checked ? 1 : 0)

@@ -1,6 +1,13 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.5.1: two follow-ups from live testing. The reader header now carries the feed favicon beside
+the feed name. The two checkboxes in *Settings → Reading* draw their own indicator from Breeze
+symbolic icons (`checkbox-symbolic` + `checkmark-symbolic`) instead of the desktop-theme checkmark,
+which showed no visible change here; the click path and prefs write were already working (the live
+daemon logged `POST /api/prefs` 200 and the stored value flipped), so this is a rendering fix only.
+
+## Previous Status
 v1.5.0: eight UI complaints fixed in one pass. Content typography was removed from the settings
 sheet (the reader menu is now the only surface). The bulk-move machinery (row checkboxes, drag
 handles, `DropArea` headers, "N selected" toolbar) is gone: a feed moves via a per-row folder
@@ -11,7 +18,6 @@ button could never reveal anything. The reader's appearance button moved to the 
 (`Text`, `preferences-desktop-font`) and its five groups carry icons. The scope menu is now built
 on every open and destroyed as a whole, because Qt's `addMenu()` wrapper rows are indestructible.
 
-## Previous Status
 v1.4.1: the six follow-ups. Bulk feed moves (`POST /api/feeds/move` + `db.move_feeds`) were driven
 from *Settings → Feeds* by ticking rows and pressing **Move** or by dragging a handle onto a folder
 header (both rejected in 1.5.0). The list pane's scope title became the filter button itself
@@ -122,6 +128,11 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
    menu.
 
 ## Chronological History
+
+- 2026-11-10 v1.5.1: reader header favicon; `ToggleBox` in the settings sheet draw `checkbox-symbolic`
+  plus a `checkmark-symbolic` overlay so the state change is visible. Diagnosed with the daemon
+  access log (POSTs present, value flipping) rather than pixels — full-frame screenshot diffs were
+  useless here, the widget repaints ~2–7% of its pixels per second on its own.
 
 - 2026-11-09 v1.5.0: eight UI fixes. Typography only in the reader; bulk-move (checkbox + drag +
   toolbar) replaced by a per-row folder `Menu`; scope menu left-aligned, iconified, folder

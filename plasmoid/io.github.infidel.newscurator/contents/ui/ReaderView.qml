@@ -21,6 +21,7 @@ Item {
     property string themeName: "auto"
     property bool compactMode: false
     property string feedTitle: ""
+    property string feedIcon: ""
     // Reader typography is edited from the toolbar menu and written to the same prefs as the
     // settings sheet, so neither surface can drift.
     property var prefs: ({})
@@ -88,12 +89,26 @@ Item {
                 PlasmaComponents3.ToolTip { text: i18n("Back to list") }
             }
 
-            Text {
+            // The header names the source and shows its favicon, so the reader says where the
+            // article came from without a trip back to the list.
+            RowLayout {
                 Layout.fillWidth: true
-                text: reader.feedTitle
-                color: Qt.rgba(reader.readFg.r, reader.readFg.g, reader.readFg.b, 0.75)
-                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
-                elide: Text.ElideRight
+                spacing: Math.round(Kirigami.Units.smallSpacing * 0.6)
+
+                Kirigami.Icon {
+                    source: reader.feedIcon.length > 0 ? reader.feedIcon : "application-rss+xml"
+                    implicitWidth: Math.round(Kirigami.Units.gridUnit * 0.8)
+                    implicitHeight: implicitWidth
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: reader.feedTitle
+                    color: Qt.rgba(reader.readFg.r, reader.readFg.g, reader.readFg.b, 0.75)
+                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                    elide: Text.ElideRight
+                }
             }
 
             PlasmaComponents3.ToolButton {

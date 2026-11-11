@@ -612,6 +612,7 @@ PlasmoidItem {
                 prefs: root.prefs
                 compactMode: root.compactUi
                 feedTitle: root.article ? (root.article.feed_title || "") : ""
+                feedIcon: root.article ? root.feedIcon(root.article.feed_id) : ""
                 onClosed: root.readerOpen = false
                 onStarToggled: (id, starred) => root.toggleStar(id, starred)
                 onOpenExternal: (url) => Qt.openUrlExternally(url)
