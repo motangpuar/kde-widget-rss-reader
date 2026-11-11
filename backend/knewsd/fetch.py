@@ -333,6 +333,46 @@ def probe(address: str, timeout: float = 15.0) -> dict[str, Any]:
     return result
 
 
+def change_url(store: Store, feed_id: int, address: str, title: str = "",
+               folder: str | None = None) -> dict[str, Any]:
+    """Point an existing subscription at a different address.
+
+    The address must resolve to a feed right now, and must not already belong to another
+    subscription, so a typo can never blank out a working feed.
+    """
+    feed = store.feed(feed_id)
+    if feed is None:
+        raise FetchError("no such feed")
+    result = probe(address)
+    if not result["ok"]:
+        raise FetchError(result["error"] or "that address is not a feed")
+
+    new_url = result["url"]
+    for other in store.feeds():
+        if other["id"] != feed_id and other["url"] == new_url:
+            raise FetchError("that address is already followed")
+
+    if new_url == feed["url"] and (folder is None or folder == feed["folder"]) \
+            and (not title or title == feed["title"]):
+        raise FetchError("nothing to change")
+
+    fields: dict[str, Any] = {"url": new_url, "etag": None, "last_modified": None,
+                              "last_error": None}
+    if title:
+        fields["title"] = title
+    elif not feed["title"]:
+        fields["title"] = result["title"]
+    if folder is not None:
+        fields["folder"] = folder
+    if not feed.get("icon") and result.get("icon"):
+        fields["icon"] = result["icon"]
+    try:
+        store.update_feed(feed_id, **fields)
+    except ValueError as exc:
+        raise FetchError(str(exc)) from exc
+    return {"ok": True, "feed": store.feed(feed_id), "entries": result["entries"]}
+
+
 def add_feed(store: Store, url: str, folder: str = "", title: str = "") -> dict[str, Any]:
     """Add a feed URL, following HTML pages to discover the feed."""
     url = url.strip()

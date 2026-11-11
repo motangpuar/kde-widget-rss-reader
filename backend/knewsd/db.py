@@ -133,14 +133,20 @@ class Store:
         return int(row["id"])
 
     def update_feed(self, feed_id: int, **fields: Any) -> None:
-        allowed = {"title", "folder", "site", "etag", "last_modified", "last_fetch", "last_error",
-                   "enabled", "icon"}
+        allowed = {"url", "title", "folder", "site", "etag", "last_modified", "last_fetch",
+                   "last_error", "enabled", "icon"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return
         sql = "UPDATE feeds SET " + ", ".join(f"{k} = ?" for k in sets) + " WHERE id = ?"
         with self._lock:
-            self.db.execute(sql, (*sets.values(), feed_id))
+            try:
+                self.db.execute(sql, (*sets.values(), feed_id))
+            except sqlite3.IntegrityError as exc:
+                self.db.rollback()
+                if "url" in str(exc):
+                    raise ValueError("that address is already followed") from exc
+                raise
             self.db.commit()
 
     def delete_feed(self, feed_id: int) -> None:

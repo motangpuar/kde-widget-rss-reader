@@ -358,9 +358,40 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, self.api.state())
             elif route == "/api/feeds/update":
                 feed_id = int(body.get("id") or 0)
-                allowed = {k: body[k] for k in ("title", "folder", "enabled") if k in body}
-                store.update_feed(feed_id, **allowed)
-                self._send(200, self.api.state())
+                feed = store.feed(feed_id)
+                if feed is None:
+                    self._send(404, {"error": "no such feed"})
+                    return
+                new_url = str(body.get("url") or "").strip()
+                folder = body.get("folder")
+                folder = None if folder is None else str(folder).strip()
+                title = str(body.get("title") or "").strip()
+                if new_url and new_url != feed["url"]:
+                    try:
+                        changed = fetchmod.change_url(store, feed_id, new_url, title, folder)
+                    except fetchmod.FetchError as exc:
+                        self._send(400, {"error": str(exc)})
+                        return
+                    self.api.refresh.start(feeds=[store.feed(feed_id)])
+                    self._send(200, {**self.api.state(), "feed": changed["feed"],
+                                     "entries": changed["entries"]})
+                    return
+                allowed: dict[str, Any] = {}
+                if title:
+                    allowed["title"] = title
+                if folder is not None:
+                    allowed["folder"] = folder
+                if "enabled" in body:
+                    allowed["enabled"] = 1 if body["enabled"] else 0
+                if not allowed:
+                    self._send(400, {"error": "nothing to change"})
+                    return
+                try:
+                    store.update_feed(feed_id, **allowed)
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                    return
+                self._send(200, {**self.api.state(), "feed": store.feed(feed_id)})
             elif route == "/api/item":
                 item_id = int(body.get("id") or 0)
                 read = body.get("read")

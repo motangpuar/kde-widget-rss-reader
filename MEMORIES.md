@@ -6,7 +6,9 @@ daemon `knewsd` (SQLite, JSON on 127.0.0.1:8770). v1.1: discovery, OPML file pic
 v1.2 (this branch): strict URL validation before follow, bulk address check + follow
 (`/api/validate`, `/api/feeds/bulk`), interactive feed deletion in sidebar *and* settings,
 OPML save-to-file (`/api/opml/save`) replacing the browser download link, port removed from the
-settings UI. Installed and running on the host. Backend 38 unit tests green; every QML component
+settings UI. Settings rebuilt as sectioned cards (Reading / Feeds / Add feeds / Backend last) with
+folder-grouped subscription management (inline title+URL+folder edit, pause, delete, per-folder add)
+and URL retargeting guarded by a live probe. Installed and running on the host. Backend 41 unit tests green; every QML component
 plus four driver scenarios (validate, bulk, export, delete) verified under the offscreen harness.
 
 ## Active State
@@ -54,6 +56,13 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 4. Consider capping stored `content` HTML per item and pruning old rows (DB growth).
 
 ## Chronological History
+- 2026-11-11: settings v2 — inline `component Section` cards, card sized
+  `min(window-2*gu, 34gu)` x `min(window-2*gu, 42gu)` with equal edge margins, ScrollView
+  `contentWidth: availableWidth` (old `width: sheet.width - 2*gu` overflowed the card),
+  feeds grouped by folder with edit/pause/delete/`+`, backend moved to the bottom.
+  Backend: `fetch.change_url` (probe → duplicate guard → retarget, clears ETag, refresh),
+  `db.update_feed` accepts `url` and maps `IntegrityError` to `ValueError`,
+  `/api/feeds/update` now 404s unknown ids and 400s on bad/duplicate URLs.
 - 2026-11-11: v1.2 — `fetch.probe` (strict, no discovery) + `/api/validate` (GET single, POST many,
   4-way `ThreadPoolExecutor`), `/api/feeds/bulk`, `/api/opml/save` with read-only fallback,
   AddFeedSheet validate gate, SettingsSheet bulk-URL section + Save-OPML `FileDialog`,
@@ -74,6 +83,10 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   `enable --now` not restarting; added `KNEWS_ACCESS_LOG` request logging.
 - 2026-11-11: offscreen harness (`/tmp/qh`) validated ReaderView blocks, ArticleList,
   FeedSidebar, SettingsSheet, AddFeedSheet against live Ars Technica article data.
+- 2026-11-11: QML `feeds` property already generates `feedsChanged`; a custom signal with that name
+  is a duplicate → the settings sheet emits `subscriptionsChanged`.
+- 2026-11-11: offscreen models can't view screenshots, so layout is verified numerically
+  (`grabToImage` + `section.width/x/height`), e.g. card 394x364 at (18,18) in a 430x400 window.
 - 2026-11-11: harness lesson — ids are *not* reachable through a root object property
   (`sheet.urlsArea` throws `TypeError`); use the bare id, or add a real property.
 - 2026-11-11: v1.1 — feed discovery (`/api/discover` + `fetch.discover`), feed favicons

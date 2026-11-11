@@ -182,6 +182,47 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertFalse(body.get("ok", False))
 
+    def test_update_feed_title_and_folder(self):
+        feed_id = self.add_feed()
+        status, body = self.post("/api/feeds/update",
+                                 {"id": feed_id, "title": "Renamed", "folder": "Later"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["feed"]["title"], "Renamed")
+        self.assertEqual(body["feed"]["folder"], "Later")
+
+        status, body = self.post("/api/feeds/update", {"id": feed_id})
+        self.assertEqual(status, 400)
+
+        status, body = self.post("/api/feeds/update", {"id": 9999, "title": "x"})
+        self.assertEqual(status, 404)
+
+    def test_update_feed_url_retargets_and_refreshes(self):
+        feed_id = self.add_feed()
+        status, body = self.post("/api/feeds/update",
+                                 {"id": feed_id, "url": "https://example.org/other.xml"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["feed"]["url"], "https://example.org/other.xml")
+        self.assertIsNone(body["feed"]["etag"])
+        self.assertGreaterEqual(body["entries"], 1)
+
+    def test_update_feed_url_rejects_dead_and_duplicate(self):
+        first = self.add_feed()
+        status, body = self.post("/api/feeds", {"url": "https://example.org/other.xml"})
+        self.assertEqual(status, 200, body)
+        second = body["feed"]["id"]
+
+        status, body = self.post("/api/feeds/update",
+                                 {"id": first, "url": "https://example.org/other.xml"})
+        self.assertEqual(status, 400, body)
+        self.assertIn("already followed", body["error"])
+
+        status, body = self.post("/api/feeds/update",
+                                 {"id": second, "url": "https://example.org/broken"})
+        self.assertEqual(status, 400, body)
+        self.assertTrue(body["error"])
+
+        self.assertEqual(self.store.feed(first)["url"], "https://example.org/feed.xml")
+
     def test_add_feed_and_list_items(self):
         feed_id = self.add_feed()
         status, listing = self.get(f"/api/items?view=unread&feed={feed_id}")

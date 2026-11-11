@@ -36,6 +36,7 @@ PlasmoidItem {
     property bool refreshRunning: false
     property bool showSidebar: true
     property bool addFeedOpen: false
+    property string addFeedFolder: ""
     property bool settingsOpen: false
 
     // ---------------------------------------------------------- reader palette
@@ -478,7 +479,7 @@ PlasmoidItem {
                 onSmartSelected: (name) => root.selectSmart(name)
                 onFeedSelected: (id) => root.selectFeed(id)
                 onFolderSelected: (folder) => root.selectFolder(folder)
-                onAddFeedRequested: root.addFeedOpen = true
+                onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
                 onDeleteFeedRequested: (id) => root.deleteFeed(id)
             }
@@ -517,7 +518,7 @@ PlasmoidItem {
                 onSearchChanged: (text) => { root.searchText = text; searchTimer.restart() }
                 onRefreshRequested: root.startRefresh()
                 onMarkAllRequested: root.markAllRead()
-                onAddFeedRequested: root.addFeedOpen = true
+                onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
                 onSidebarToggled: root.showSidebar = !root.showSidebar
                 onLoadMoreRequested: root.loadMore()
@@ -565,6 +566,7 @@ PlasmoidItem {
             anchors.fill: parent
             visible: root.addFeedOpen
             folders: root.folders
+            presetFolder: root.addFeedFolder
             onAccepted: (url, folder) => root.addFeed(url, folder)
             onCancelled: root.addFeedOpen = false
         }
@@ -581,6 +583,12 @@ PlasmoidItem {
             onRefreshNowRequested: root.startRefresh()
             onImportOpml: (text) => root.importOpml(text)
             onDeleteFeedRequested: (id) => root.deleteFeed(id)
+            onSubscriptionsChanged: root.loadState(false)
+            onAddFeedRequested: (folder) => {
+                root.addFeedFolder = folder
+                root.settingsOpen = false
+                root.addFeedOpen = true
+            }
             onFeedsAdded: (added, failed) => {
                 root.settingsOpen = false
                 root.loadState(true)

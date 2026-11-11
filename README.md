@@ -65,6 +65,7 @@ Uninstall (keeps your feeds and read state):
 | Star | star icon on a row or in the reader toolbar |
 | Mark all read | double-click the read icon (5 s confirmation window) |
 | Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
+| Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
 | Settings | gear icon: theme, text size, serif, refresh interval, bulk add, feed removal, OPML |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
@@ -116,6 +117,23 @@ EOF
 ```
 
 Feeds are fetched immediately; failures are reported per URL and can be retried from Settings.
+
+### Managing subscriptions in Settings
+
+The *Feeds* section groups every subscription under its folder (ungrouped feeds last) and gives
+each row four actions:
+
+| Action | Effect |
+|---|---|
+| pencil | inline editor for title, folder and address |
+| pause / play | stop or resume background fetching (`enabled` in the DB) |
+| trash (×2) | delete the feed and its items, second click confirms |
+| folder `+` | open the follow dialog with that folder prefilled |
+
+Changing the address is guarded: the new URL is fetched and parsed first, and it is rejected with
+*that address is already followed* if another subscription already points at it, so a mistyped
+address can never empty a working feed. A successful change clears the stored ETag and re-fetches
+immediately.
 
 ### Taking feeds out
 
@@ -197,7 +215,8 @@ GET  /api/refresh/status      background refresh progress
 GET  /api/opml                OPML export
 POST /api/feeds               {"url": "...", "folder": "..."}
 POST /api/feeds/delete        {"id": 1}
-POST /api/feeds/update        {"id": 1, "folder": "...", "enabled": 1}
+POST /api/feeds/update        {"id": 1, "title": "...", "folder": "...", "enabled": 1}
+POST /api/feeds/update        {"id": 1, "url": "https://..."} — re-probes, then retargets
 POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
 POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
 POST /api/refresh             {} or {"feed": 1}
@@ -209,7 +228,7 @@ POST /api/extract             {"id": 1} — force re-extraction
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 38 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 41 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```

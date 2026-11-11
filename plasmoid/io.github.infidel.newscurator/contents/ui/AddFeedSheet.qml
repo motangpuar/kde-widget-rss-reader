@@ -9,6 +9,7 @@ Item {
     id: sheet
 
     property var folders: []
+    property string presetFolder: ""
     property var candidates: []
     property string selectedUrl: ""
     property string message: ""
@@ -31,7 +32,7 @@ Item {
         validationText = ""
         validationOk = false
         urlField.text = ""
-        folderField.text = ""
+        folderField.text = presetFolder
     }
 
     // Strictly verify that the selected address is a usable feed *before* adding it,
@@ -113,10 +114,12 @@ Item {
     }
 
     onVisibleChanged: {
-        if (!visible)
+        if (!visible) {
             reset()
-        else
+        } else {
+            folderField.text = presetFolder
             urlField.forceActiveFocus()
+        }
     }
 
     Rectangle {
