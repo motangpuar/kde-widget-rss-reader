@@ -31,7 +31,6 @@ Item {
     signal openExternal(string url)
     signal reextractRequested()
     signal fontScaleChanged(int delta)
-    signal themeCycled()
     signal prefsEdited(var values)
 
     readonly property real maxTextWidth: Math.min(Math.max(width - Kirigami.Units.gridUnit * 3, 200),
@@ -113,74 +112,84 @@ Item {
             }
             PlasmaComponents3.ToolButton {
                 visible: !reader.compactMode
-                icon.name: "format-font-size-decrease"
+                icon.name: "zoom-out"
                 display: AbstractButton.IconOnly
                 onClicked: reader.fontScaleChanged(-10)
                 PlasmaComponents3.ToolTip { text: i18n("Smaller text") }
             }
             PlasmaComponents3.ToolButton {
                 visible: !reader.compactMode
-                icon.name: "format-font-size-increase"
+                icon.name: "zoom-in"
                 display: AbstractButton.IconOnly
                 onClicked: reader.fontScaleChanged(10)
                 PlasmaComponents3.ToolTip { text: i18n("Larger text") }
             }
-            PlasmaComponents3.ToolButton {
-                icon.name: "color-management"
-                display: AbstractButton.IconOnly
-                onClicked: reader.themeCycled()
-                PlasmaComponents3.ToolTip { text: i18n("Reading theme (%1)", reader.themeName) }
-            }
+            // Kept last: it is the least used control but the only way to reach the other four.
             PlasmaComponents3.ToolButton {
                 id: lookButton
-                icon.name: "format-text"
-                display: AbstractButton.IconOnly
-                onClicked: lookMenu.popup()
+                objectName: "look-button"
+                icon.name: "preferences-desktop-font"
+                text: i18n("Text")
+                display: reader.compactMode ? AbstractButton.IconOnly
+                                            : AbstractButton.TextBesideIcon
+                onClicked: lookMenu.popup(lookButton, 0, lookButton.height)
                 PlasmaComponents3.ToolTip { text: i18n("Text appearance") }
 
                 PlasmaComponents3.Menu {
                     id: lookMenu
-                    y: lookButton.height
 
+                    // Each group is a submenu: a Menu nested in a Menu shows its title and icon
+                    // on the parent row, so the group labels carry icons too.
                     PlasmaComponents3.Menu {
-                        title: i18n("Theme")
+                        title: i18n("Reading theme (%1)", reader.themeName)
+                        icon.name: "preferences-desktop-theme"
                         Repeater {
                             model: Typography.THEMES
                             delegate: PlasmaComponents3.MenuItem {
                                 required property var modelData
+
                                 text: i18n(modelData.label)
-                                icon.name: (reader.prefs.reader_theme || "auto") === modelData.value
-                                           ? "checkmark" : ""
-                                onTriggered: reader.prefsEdited({ "reader_theme": modelData.value })
+                                icon.name: (reader.prefs.reader_theme || "auto")
+                                           === modelData.value
+                                           ? "checkmark" : "preferences-desktop-theme"
+                                onTriggered: reader.prefsEdited(
+                                                 { "reader_theme": modelData.value })
                             }
                         }
                     }
 
                     PlasmaComponents3.Menu {
                         title: i18n("Font")
+                        icon.name: "preferences-desktop-font"
                         Repeater {
                             model: reader.fonts
                             delegate: PlasmaComponents3.MenuItem {
                                 required property var modelData
-                                text: modelData.family.length > 0 ? modelData.family : i18n(modelData.label)
-                                icon.name: Typography.isFontSelected(modelData,
-                                                                     reader.prefs.font_family || "",
-                                                                     reader.prefs.serif || 0)
-                                           ? "checkmark" : ""
-                                onTriggered: reader.prefsEdited(Typography.patchForFont(modelData))
+
+                                text: modelData.family.length > 0
+                                      ? modelData.family : i18n(modelData.label)
+                                icon.name: Typography.isFontSelected(
+                                                   modelData,
+                                                   reader.prefs.font_family || "",
+                                                   reader.prefs.serif || 0)
+                                           ? "checkmark" : "preferences-desktop-font"
+                                onTriggered: reader.prefsEdited(
+                                                 Typography.patchForFont(modelData))
                             }
                         }
                     }
 
                     PlasmaComponents3.Menu {
                         title: i18n("Size (%1%)", reader.prefs.font_scale || 100)
+                        icon.name: "zoom-in"
                         Repeater {
                             model: Typography.SIZES
                             delegate: PlasmaComponents3.MenuItem {
-                                required property int modelData
+                                required property var modelData
+
                                 text: modelData + "%"
                                 icon.name: (reader.prefs.font_scale || 100) === modelData
-                                           ? "checkmark" : ""
+                                           ? "checkmark" : "zoom-in"
                                 onTriggered: reader.prefsEdited({ "font_scale": modelData })
                             }
                         }
@@ -188,33 +197,42 @@ Item {
 
                     PlasmaComponents3.Menu {
                         title: i18n("Line spacing")
+                        icon.name: "view-sort-ascending"
                         Repeater {
                             model: Typography.SPACING
                             delegate: PlasmaComponents3.MenuItem {
                                 required property var modelData
+
                                 text: i18n(modelData.label)
-                                icon.name: (reader.prefs.line_height || 160) === modelData.value
-                                           ? "checkmark" : ""
-                                onTriggered: reader.prefsEdited({ "line_height": modelData.value })
+                                icon.name: (reader.prefs.line_height || 160)
+                                           === modelData.value
+                                           ? "checkmark" : "view-sort-ascending"
+                                onTriggered: reader.prefsEdited(
+                                                 { "line_height": modelData.value })
                             }
                         }
                     }
 
                     PlasmaComponents3.Menu {
                         title: i18n("Margins")
+                        icon.name: "zoom-fit-best"
                         Repeater {
                             model: Typography.MARGINS
                             delegate: PlasmaComponents3.MenuItem {
                                 required property var modelData
+
                                 text: i18n(modelData.label)
-                                icon.name: (reader.prefs.reader_padding || 100) === modelData.value
-                                           ? "checkmark" : ""
-                                onTriggered: reader.prefsEdited({ "reader_padding": modelData.value })
+                                icon.name: (reader.prefs.reader_padding || 100)
+                                           === modelData.value
+                                           ? "checkmark" : "zoom-fit-best"
+                                onTriggered: reader.prefsEdited(
+                                                 { "reader_padding": modelData.value })
                             }
                         }
                     }
                 }
             }
+
             PlasmaComponents3.ToolButton {
                 icon.name: "internet-services"
                 display: AbstractButton.IconOnly

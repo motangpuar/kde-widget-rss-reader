@@ -4,7 +4,6 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents3
-import "Typography.js" as Typography
 import "Api.js" as Api
 
 Item {
@@ -46,107 +45,33 @@ Item {
         return value === undefined || value === null ? fallback : value
     }
 
-    readonly property var fonts: Typography.fontChoices(Qt.fontFamilies())
-    // Checkbox multi-select for bulk folder moves; a plain object because ids are sparse.
-    property var checkedIds: ({})
-    readonly property int checkedCount: countChecked()
-    readonly property var folderModel: buildFolderModel()
-
-    function countChecked() {
-        var total = 0
-        for (var key in checkedIds)
-            if (checkedIds[key])
-                ++total
-        return total
-    }
-
-    function feedLabelById(id) {
-        for (var i = 0; i < feeds.length; ++i)
-            if (feeds[i].id === id)
-                return feedLabel(feeds[i])
-        return i18n("feed")
-    }
-
-    function checkedList() {
-        var out = []
-        for (var key in checkedIds)
-            if (checkedIds[key])
-                out.push(Number(key))
-        return out
-    }
-
-    function isChecked(id) {
-        return checkedIds[String(id)] === true
-    }
-
-    function setChecked(id, on) {
-        var next = {}
-        for (var key in checkedIds)
-            next[key] = checkedIds[key]
-        if (on)
-            next[String(id)] = true
-        else
-            delete next[String(id)]
-        checkedIds = next
-    }
-
-    function folderAt(index, model) {
-        if (index <= 0 || !model)
-            return ""
-        return String(model[index])
-    }
-
-    function clearChecked() {
-        checkedIds = ({})
-    }
-
-    // "No folder" first, then the folders that actually exist, so a move can empty one.
-    function buildFolderModel() {
-        var out = [i18n("No folder")]
+    // Folder picker entries: "no folder" first, then every folder currently in use.
+    function folderNames() {
         var names = []
-        for (var i = 0; i < feeds.length; ++i) {
+        for (var i = 0; i < (feeds ? feeds.length : 0); ++i) {
             var name = feeds[i].folder || ""
             if (name.length > 0 && names.indexOf(name) < 0)
                 names.push(name)
         }
         names.sort()
-        return out.concat(names)
+        return names
     }
 
-    function moveChecked(folder) {
-        var ids = checkedList()
-        if (ids.length === 0)
-            return
-        feedStatus = ids.length === 1 ? i18n("Moving 1 feed…")
-                                      : i18n("Moving %1 feeds…", ids.length)
+    function setFolder(feed, folder) {
+        var target = String(folder || "")
+        feedStatus = i18n("Moving %1…", feedLabel(feed))
         feedStatusIsError = false
-        Api.request("POST", "/api/feeds/move", { "ids": ids, "folder": folder },
+        Api.request("POST", "/api/feeds/update", { "id": feed.id, "folder": target },
                     function (status, data) {
-            if (status !== 200 || !data) {
-                sheet.feedStatus = i18n("Could not move those feeds.")
+            if (status !== 200 || !data || data.error) {
+                sheet.feedStatus = (data && data.error) ? data.error
+                                                        : i18n("Could not move that feed.")
                 sheet.feedStatusIsError = true
                 return
             }
-            sheet.feedStatus = data.moved === 1 ? i18n("Moved 1 feed.")
-                                                : i18n("Moved %1 feeds.", data.moved)
-            sheet.feedStatusIsError = false
-            sheet.clearChecked()
-            sheet.subscriptionsChanged()
-        })
-    }
-
-    // Drag-and-drop entry point: one feed id dropped on a folder header.
-    function moveOne(id, folder) {
-        Api.request("POST", "/api/feeds/move", { "ids": [id], "folder": folder },
-                    function (status, data) {
-            if (status !== 200 || !data) {
-                sheet.feedStatus = i18n("Could not move that feed.")
-                sheet.feedStatusIsError = true
-                return
-            }
-            sheet.feedStatus = folder.length > 0
-                    ? i18n("Moved %1 to %2", sheet.feedLabelById(id), folder)
-                    : i18n("Moved %1 out of its folder", sheet.feedLabelById(id))
+            sheet.feedStatus = target.length > 0
+                    ? i18n("Moved %1 to %2", feedLabel(feed), target)
+                    : i18n("Moved %1 out of its folder", feedLabel(feed))
             sheet.feedStatusIsError = false
             sheet.subscriptionsChanged()
         })
@@ -462,99 +387,10 @@ Item {
                     width: scroll.availableWidth
                     spacing: Kirigami.Units.smallSpacing * 2
 
-                    // ------------------------------------------------------ content
+                    // ------------------------------------------------------ reading
                     Section {
-                        title: i18n("Content")
-                        summary: i18n("how articles are rendered")
-
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: Kirigami.Units.gridUnit
-                            rowSpacing: Kirigami.Units.smallSpacing
-
-                            Text {
-                                text: i18n("Theme")
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                Layout.fillWidth: true
-                                model: Typography.THEMES
-                                textRole: "label"
-                                currentIndex: Typography.indexOfValue(Typography.THEMES,
-                                                                      sheet.pref("reader_theme", "auto"))
-                                onActivated: (index) => sheet.prefChanged("reader_theme",
-                                                                          model[index].value)
-                            }
-
-                            Text {
-                                text: i18n("Font")
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                id: fontBox
-                                Layout.fillWidth: true
-                                model: sheet.fonts
-                                textRole: "label"
-                                currentIndex: Typography.fontIndex(model, sheet.pref("font_family", ""),
-                                                                   sheet.pref("serif", 0))
-                                onActivated: (index) => sheet.prefsPatched(
-                                    Typography.patchForFont(model[index]))
-                            }
-
-                            Text {
-                                text: i18n("Size")
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                Layout.fillWidth: true
-                                model: Typography.SIZES
-                                currentIndex: Typography.indexOfSize(sheet.pref("font_scale", 100))
-                                onActivated: (index) => sheet.prefChanged("font_scale", model[index])
-                                displayText: sheet.pref("font_scale", 100) + "%"
-                            }
-
-                            Text {
-                                text: i18n("Line spacing")
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                Layout.fillWidth: true
-                                model: Typography.SPACING
-                                textRole: "label"
-                                currentIndex: Typography.indexOfValue(Typography.SPACING,
-                                                                      sheet.pref("line_height", 160))
-                                onActivated: (index) => sheet.prefChanged("line_height",
-                                                                          model[index].value)
-                            }
-
-                            Text {
-                                text: i18n("Margins")
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                Layout.fillWidth: true
-                                model: Typography.MARGINS
-                                textRole: "label"
-                                currentIndex: Typography.indexOfValue(Typography.MARGINS,
-                                                                      sheet.pref("reader_padding", 100))
-                                onActivated: (index) => sheet.prefChanged("reader_padding",
-                                                                          model[index].value)
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.topMargin: Kirigami.Units.smallSpacing / 2
-                            implicitHeight: 1
-                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
-                                           Kirigami.Theme.textColor.b, 0.1)
-                        }
+                        title: i18n("Reading")
+                        summary: i18n("what happens when you open an article")
 
                         PlasmaComponents3.CheckBox {
                             text: i18n("Mark read when opened")
@@ -573,40 +409,6 @@ Item {
                         title: i18n("Feeds")
                         summary: i18n("%1 subscriptions", sheet.feeds.length)
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.bottomMargin: Kirigami.Units.smallSpacing / 2
-                            spacing: Kirigami.Units.smallSpacing
-                            visible: sheet.checkedCount > 0
-
-                            Text {
-                                text: sheet.checkedCount === 1
-                                      ? i18n("1 selected")
-                                      : i18n("%1 selected", sheet.checkedCount)
-                                color: Kirigami.Theme.textColor
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
-                            }
-                            PlasmaComponents3.ComboBox {
-                                id: moveTarget
-                                Layout.fillWidth: true
-                                // Index 0 is the empty folder, so "move" can also unfile a feed.
-                                model: sheet.folderModel
-                                currentIndex: 0
-                            }
-                            PlasmaComponents3.Button {
-                                text: i18n("Move")
-                                icon.name: "edit-move"
-                                onClicked: sheet.moveChecked(
-                                    sheet.folderAt(moveTarget.currentIndex, moveTarget.model))
-                            }
-                            PlasmaComponents3.ToolButton {
-                                icon.name: "edit-clear"
-                                display: AbstractButton.IconOnly
-                                onClicked: sheet.clearChecked()
-                                PlasmaComponents3.ToolTip { text: i18n("Clear the selection") }
-                            }
-                        }
-
                         Repeater {
                             model: sheet.feedGroups
                             delegate: ColumnLayout {
@@ -615,64 +417,40 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.smallSpacing / 2
 
-                                // Folder headers double as drop targets for dragged feeds.
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.topMargin: Kirigami.Units.smallSpacing / 2
-                                    implicitHeight: headerRow.implicitHeight + Kirigami.Units.smallSpacing / 2
-                                    radius: Kirigami.Units.smallSpacing / 2
-                                    color: headerDrop.containsDrag
-                                           ? Qt.rgba(Kirigami.Theme.highlightColor.r,
-                                                     Kirigami.Theme.highlightColor.g,
-                                                     Kirigami.Theme.highlightColor.b, 0.25)
-                                           : "transparent"
-
-                                    RowLayout {
-                                        id: headerRow
-                                        anchors.fill: parent
-                                        anchors.leftMargin: Kirigami.Units.smallSpacing / 2
-                                        anchors.rightMargin: Kirigami.Units.smallSpacing / 2
-                                        spacing: Kirigami.Units.smallSpacing
-                                    Kirigami.Icon {
-                                        source: "folder"
-                                        implicitWidth: Kirigami.Units.iconSizes.small
-                                        implicitHeight: Kirigami.Units.iconSizes.small
-                                        opacity: 0.7
-                                    }
-                                    Text {
-                                        text: group.modelData.label
-                                        color: Kirigami.Theme.textColor
-                                        font.bold: true
-                                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
-                                    }
-                                    Text {
-                                        text: group.modelData.count
-                                        color: Kirigami.Theme.disabledTextColor
-                                        font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    PlasmaComponents3.ToolButton {
-                                        icon.name: "list-add"
-                                        display: AbstractButton.IconOnly
-                                        enabled: sheet.backendUp
-                                        onClicked: sheet.addFeedRequested(group.modelData.name)
-                                        PlasmaComponents3.ToolTip {
-                                            text: group.modelData.name.length > 0
-                                                  ? i18n("Add a feed to %1", group.modelData.name)
-                                                  : i18n("Add a feed without a folder")
-                                        }
-                                    }
-                                    }
-
-                                    DropArea {
-                                        id: headerDrop
-                                        anchors.fill: parent
-                                        keys: ["text/plain"]
-                                        onDropped: (drop) => {
-                                            drop.acceptProposedAction()
-                                            sheet.moveOne(Number(drop.text), group.modelData.name)
-                                        }
-                                    }
+                                RowLayout {
+                                      id: headerRow
+                                          Layout.fillWidth: true
+                                          Layout.topMargin: Kirigami.Units.smallSpacing / 2
+                                          spacing: Kirigami.Units.smallSpacing
+                                          Kirigami.Icon {
+                                              source: "folder"
+                                              implicitWidth: Kirigami.Units.iconSizes.small
+                                              implicitHeight: Kirigami.Units.iconSizes.small
+                                              opacity: 0.7
+                                      }
+                                      Text {
+                                          text: group.modelData.label
+                                          color: Kirigami.Theme.textColor
+                                          font.bold: true
+                                          font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.74)
+                                      }
+                                      Text {
+                                          text: group.modelData.count
+                                          color: Kirigami.Theme.disabledTextColor
+                                          font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                                      }
+                                      Item { Layout.fillWidth: true }
+                                      PlasmaComponents3.ToolButton {
+                                          icon.name: "list-add"
+                                          display: AbstractButton.IconOnly
+                                          enabled: sheet.backendUp
+                                          onClicked: sheet.addFeedRequested(group.modelData.name)
+                                          PlasmaComponents3.ToolTip {
+                                              text: group.modelData.name.length > 0
+                                                    ? i18n("Add a feed to %1", group.modelData.name)
+                                                    : i18n("Add a feed without a folder")
+                                          }
+                                      }
                                 }
 
                                 Repeater {
@@ -691,15 +469,6 @@ Item {
                                             Layout.fillWidth: true
                                             spacing: Kirigami.Units.smallSpacing
 
-                                            PlasmaComponents3.CheckBox {
-                                                id: feedCheck
-                                                objectName: "feed-check"
-                                                Layout.alignment: Qt.AlignVCenter
-                                                checked: sheet.isChecked(feedCard.modelData.id)
-                                                onToggled: sheet.setChecked(feedCard.modelData.id,
-                                                                            checked)
-                                            }
-
                                             Image {
                                                 id: feedIcon
                                                 source: sheet.favicon(feedCard.modelData)
@@ -717,41 +486,54 @@ Item {
                                                 opacity: 0.8
                                             }
 
-                                            // Drag handle: dropping the row on a folder header moves it.
-                                            Kirigami.Icon {
-                                                id: dragHandle
-                                                source: "transform-move"
-                                                implicitWidth: Kirigami.Units.iconSizes.small
-                                                implicitHeight: Kirigami.Units.iconSizes.small
-                                                opacity: dragMouse.drag.active ? 1 : 0.45
-                                                Layout.alignment: Qt.AlignVCenter
-
-                                                MouseArea {
-                                                    id: dragMouse
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.OpenHandCursor
-                                                    drag.target: dragGhost
-                                                    drag.axis: Drag.YAxis
+                                            // Folder picker: one click, no dragging, no multi-select.
+                                            PlasmaComponents3.ToolButton {
+                                                id: folderButton
+                                                objectName: "feed-folder"
+                                                icon.name: "folder"
+                                                display: AbstractButton.IconOnly
+                                                enabled: sheet.backendUp
+                                                onClicked: folderMenu.popup(folderButton, 0,
+                                                                             folderButton.height)
+                                                PlasmaComponents3.ToolTip {
+                                                    text: (feedCard.modelData.folder || "").length > 0
+                                                          ? i18n("Folder: %1", feedCard.modelData.folder)
+                                                          : i18n("Not in a folder")
                                                 }
-                                            }
-                                            Rectangle {
-                                                id: dragGhost
-                                                width: feedCard.width
-                                                height: Kirigami.Units.gridUnit * 1.6
-                                                visible: dragMouse.drag.active
-                                                z: 50
-                                                radius: Kirigami.Units.smallSpacing / 2
-                                                color: Kirigami.Theme.highlightColor
-                                                opacity: 0.9
-                                                Drag.active: dragMouse.drag.active
-                                                Drag.mimeData: ({ "text/plain": String(feedCard.modelData.id) })
-                                                Drag.hotSpot.x: width / 2
-                                                Drag.hotSpot.y: height / 2
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: sheet.feedLabel(feedCard.modelData)
-                                                    color: Kirigami.Theme.highlightedTextColor
-                                                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+
+                                                PlasmaComponents3.Menu {
+                                                    id: folderMenu
+
+                                                    PlasmaComponents3.MenuItem {
+                                                        text: i18n("No folder")
+                                                        icon.name: "folder-new"
+                                                        font.bold:
+                                                            (feedCard.modelData.folder || "") === ""
+                                                        onTriggered: sheet.setFolder(
+                                                                        feedCard.modelData, "")
+                                                    }
+                                                    Repeater {
+                                                        model: sheet.folderNames()
+                                                        delegate: PlasmaComponents3.MenuItem {
+                                                            required property var modelData
+
+                                                            text: String(modelData)
+                                                            icon.name: "folder"
+                                                            font.bold:
+                                                                feedCard.modelData.folder
+                                                                === String(modelData)
+                                                            onTriggered: sheet.setFolder(
+                                                                            feedCard.modelData,
+                                                                            String(modelData))
+                                                        }
+                                                    }
+                                                    PlasmaComponents3.MenuSeparator {}
+                                                    PlasmaComponents3.MenuItem {
+                                                        text: i18n("New folder…")
+                                                        icon.name: "folder-new"
+                                                        onTriggered: sheet.editingId =
+                                                                     feedCard.modelData.id
+                                                    }
                                                 }
                                             }
 

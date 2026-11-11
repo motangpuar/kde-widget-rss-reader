@@ -1,17 +1,25 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
-v1.4.1 (unreleased): the six requested follow-ups. Bulk feed moves (`POST /api/feeds/move` +
-`db.move_feeds`) are driven from *Settings → Feeds* either by ticking rows and pressing **Move**
-or by dragging a row's handle onto a folder header (`DropArea` on the group header). The list
-pane's scope title is now the filter button itself (`TextBesideIcon`, `view-list-details`) instead
-of an unlabelled icon next to a static label. Reader typography gained a second surface: a
-`format-text` toolbar menu with Theme / Font / Size / Line spacing / Margins submenus, sharing
-`Typography.js` with the settings dropdowns and writing the same prefs via `setPrefs`.
-`lineHeightPercent` is now applied *and* scales block spacing, so line spacing is no longer a
-dead pref.
+v1.5.0: eight UI complaints fixed in one pass. Content typography was removed from the settings
+sheet (the reader menu is now the only surface). The bulk-move machinery (row checkboxes, drag
+handles, `DropArea` headers, "N selected" toolbar) is gone: a feed moves via a per-row folder
+`Menu`. The scope menu is left-aligned under its button, every row carries an icon, folders are
+submenus, and the button icon reflects the current scope. The feed sidebar and its toggle were
+deleted outright — at the widget's 437 px width `compactUi` is always true, so the "Show feeds"
+button could never reveal anything. The reader's appearance button moved to the end of the toolbar
+(`Text`, `preferences-desktop-font`) and its five groups carry icons. The scope menu is now built
+on every open and destroyed as a whole, because Qt's `addMenu()` wrapper rows are indestructible.
 
 ## Previous Status
+v1.4.1: the six follow-ups. Bulk feed moves (`POST /api/feeds/move` + `db.move_feeds`) were driven
+from *Settings → Feeds* by ticking rows and pressing **Move** or by dragging a handle onto a folder
+header (both rejected in 1.5.0). The list pane's scope title became the filter button itself
+(`TextBesideIcon`) instead of an unlabelled icon next to a static label. Reader typography gained a
+`format-text` toolbar menu with Theme / Font / Size / Line spacing / Margins submenus sharing
+`Typography.js` with the settings dropdowns. `lineHeightPercent` is applied *and* scales block
+spacing.
+
 v1.4.0: fixed five widget defects reported against 1.3.0 — the header feed toggle was pinned
 open by a width clause, serif/content preferences appeared dead because `font.family` received a
 CSS-style fallback list, the reader star never repainted after a toggle, there was no way to pick a
@@ -36,7 +44,11 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   image cache `~/.cache/knews-curator/images`, applet under
   `~/.local/share/plasma/plasmoids/io.github.infidel.newscurator`.
 - Dev loop: `./install.sh` (full reinstall) or `./dev-reload.sh` (applet only + plasmashell
-  restart + QML error grep).
+  restart + QML error grep). Verified after 1.5.0: installed QML md5s match the repo and
+  plasmashell logs no `error when loading applet`.
+- v1.5.0 files touched: `ArticleList.qml` (scope helpers + JS menu), `SettingsSheet.qml`
+  (folder `Menu`, Reading card), `ReaderView.qml` (toolbar order, iconed groups), `main.qml`
+  (sidebar wiring removed), `FeedSidebar.qml` **deleted**.
 
 ## Known Blockers / Facts
 - `AbstractButton.toggle()` does **not** emit `toggled` (that signal is user-interaction only), so
@@ -45,8 +57,20 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 - Give repeated delegates an `objectName` when the harness has to find one specific kind: the item
   tree also contains internal child items, so `text === ""` / `width < 40` predicates match dozens
   of unrelated nodes (40 matches for 9 feed rows).
-- `DropArea` and `Menu`/`Popup` children are real items, so `findAll` can see a `DropArea`; a Menu
-  is not instantiated until the first `popup()`, so its items are invisible to the harness.
+- A Menu is not instantiated until the first `popup()`, so its items are invisible to the harness;
+  once created it is reachable through `Item.resources` (it is not an Item, so `contentItem
+  .children` misses it). A harness that must reach a JS-created popup should expose it as a
+  `property var` (here `list.scopeMenu`) instead.
+- **`Menu.addMenu(sub)` generates a C++-owned wrapper row that cannot be `destroy()`ed**
+  (`Invalid attempt to destroy() an indestructible object`), and `takeItem()` hands that same row
+  back. Do not build a menu to be cleared row by row: create the whole `Menu` with
+  `Qt.createQmlObject` under a `property var`, and destroy that one JS-owned object on the next
+  open — the wrapper rows die with it. Verified by opening the scope menu four times: `count`
+  stayed 8 and the bold state followed `selectedFeedId`.
+- `Menu.addItem()` can return a row that is `null` immediately afterwards (`itemAt(count - 1)` right
+  after `addMenu`); never store those in an array for later removal.
+- Popup menus are not in `contentItem.children` (they are `Item.resources`), and a `Menu` is not an
+  Item, so it has no `mapToItem` — use `menu.contentItem.mapToItem(null, 0, 0)`.
 - Host immutable (rpm-ostree); Plasma tooling only on host → scripts self re-exec through
   `distrobox-host-exec`. Project path is identical on both sides.
 - No `qmllint` on host, no `qml` runtime on host. Container has Qt 6.12 (`/usr/lib/qt6/bin/qmllint`,
@@ -85,8 +109,10 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   verification of `save_opml` must target paths the harness can read (or `/tmp/qh`).
 
 ## Next Steps
-1. Ask the user to confirm the reader `format-text` menu and the drag handle behave in the live
-   widget — popups and real drags cannot be exercised in the offscreen harness.
+1. Ask the user to confirm in the live widget: the left-aligned scope menu with folder submenus and
+   the scope icon changing per view, the `Text` button at the end of the reader toolbar with its
+   five iconed groups, and the per-feed folder menu in *Settings → Feeds*. Popups cannot be
+   exercised from the offscreen harness.
 2. Discovery edge case: YouTube channel pages return 404 to non-JS clients; consider
    `youtube.com/channel/UC…` → `feeds/videos.xml?channel_id=`.
 3. Optional: prefetch preview mark-read on scroll end (currently only on open).
@@ -96,6 +122,13 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
    menu.
 
 ## Chronological History
+
+- 2026-11-09 v1.5.0: eight UI fixes. Typography only in the reader; bulk-move (checkbox + drag +
+  toolbar) replaced by a per-row folder `Menu`; scope menu left-aligned, iconified, folder
+  submenus, scope-aware button icon; sidebar deleted (dead at 437 px); reader appearance button
+  moved to the end of the toolbar as `Text`; menu groups iconified. Root-caused the live
+  `removeItem` TypeError (`itemAt` returning null right after `addMenu`) and then the follow-up
+  `destroy()` failure (wrapper rows are indestructible) → menu is rebuilt from scratch per open.
 - 2026-11-12: v1.4.1 — bulk feed moves (`db.move_feeds`, `POST /api/feeds/move`, 400 on a bad id
   list, 404 on unknown ids) wired to checkboxes + a *Move* dropdown in *Settings → Feeds* and to a
   `DropArea` on each folder header; `ArticleList` scope title became the filter button

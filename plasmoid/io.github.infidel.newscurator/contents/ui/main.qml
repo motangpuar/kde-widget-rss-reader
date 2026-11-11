@@ -37,7 +37,6 @@ PlasmoidItem {
     // Set while a mark-all sweep can still be undone from the notice banner.
     property var undoMarkAll: null
     property bool refreshRunning: false
-    property bool showSidebar: true
     property bool addFeedOpen: false
     property string addFeedFolder: ""
     property bool settingsOpen: false
@@ -545,36 +544,6 @@ PlasmoidItem {
             anchors.margins: 1
             spacing: 0
 
-            FeedSidebar {
-                id: sidebar
-                Layout.fillHeight: true
-                Layout.preferredWidth: Math.min(Kirigami.Units.gridUnit * 14, root.width * 0.3)
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 10
-                // The header button owns this now; the width clause used to pin it open and
-                // made "hide feeds" look broken on wide widgets.
-                visible: !root.compactUi && root.showSidebar
-                feeds: root.feeds
-                folders: root.folders
-                counts: root.counts
-                selectedFeedId: root.selectedFeedId
-                selectedFolder: root.selectedFolder
-                smartView: root.view
-                onSmartSelected: (name) => root.selectSmart(name)
-                onFeedSelected: (id) => root.selectFeed(id)
-                onFolderSelected: (folder) => root.selectFolder(folder)
-                onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
-                onSettingsRequested: root.settingsOpen = true
-                onDeleteFeedRequested: (id) => root.deleteFeed(id)
-            }
-
-            Rectangle {
-                Layout.fillHeight: true
-                Layout.preferredWidth: 1
-                color: Kirigami.Theme.textColor
-                opacity: 0.12
-                visible: sidebar.visible
-            }
-
             ArticleList {
                 id: list
                 Layout.fillHeight: true
@@ -594,7 +563,6 @@ PlasmoidItem {
                 selectionTitle: root.selectedTitle()
                 thumbBase: "http://127.0.0.1:" + root.backendPort + "/api/thumb?id="
                 iconFor: (feedId) => root.feedIcon(feedId)
-                sidebarVisible: sidebar.visible
                 selectedFeedId: root.selectedFeedId
                 selectedFolder: root.selectedFolder
                 feeds: root.feeds
@@ -615,7 +583,6 @@ PlasmoidItem {
                 }
                 onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
-                onSidebarToggled: root.showSidebar = !root.showSidebar
                 onLoadMoreRequested: root.loadMore()
             }
 
@@ -652,11 +619,6 @@ PlasmoidItem {
                 onPrefsEdited: (values) => root.setPrefs(values)
                 onFontScaleChanged: (delta) => root.setPref("font_scale",
                     Math.max(80, Math.min(170, root.fontScale + delta)))
-                onThemeCycled: {
-                    var order = ["auto", "light", "sepia", "dark"]
-                    var idx = order.indexOf(root.readerTheme)
-                    root.setPref("reader_theme", order[(idx + 1) % order.length])
-                }
             }
         }
 

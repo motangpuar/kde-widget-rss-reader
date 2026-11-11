@@ -16,14 +16,14 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
   served as `file://` URIs.
 - **Feed discovery** — type a site address (`lwn.net`, `arstechnica.com`, a channel URL) and the
   applet searches the page for feeds, like Inoreader's follow box.
-- **Source icons** — cached favicons next to each feed in the sidebar and next to the source name
-  in the article list.
+- **Source icons** — cached favicons in the scope menu, on the scope button when a single feed is
+  selected, and next to the source name in the article list.
 - **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import/export.
 - **Bulk follow** — paste a list of addresses, validate them all in parallel, then follow only the
   ones that actually serve a feed.
 - **Guarded adds** — the follow dialog validates a URL before offering *Follow*, so a typo or a
   dead feed never lands in your list.
-- **Feed removal** — hover any feed in the sidebar for a delete button (second click confirms).
+- **Feed removal** — *Settings → Feeds*, trash icon on the row (second click confirms).
 - **State** — unread counts, folders, stars, mark-all-read, background refresh with
   ETag/Last-Modified conditional requests.
 
@@ -63,26 +63,25 @@ Uninstall (keeps your feeds and read state):
 | Read an article | click a row — opens the built-in reader |
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
-| Browse by folder or source | the title button in the list header (`view-list-details` icon) opens the scope menu: smart views, folders, feeds |
-| Show/hide the feed sidebar | `view-split-left-right` icon in the header |
+| Browse by folder or source | the title button in the list header opens the scope menu, left-aligned under the button: smart views, one submenu per folder (folder itself + its feeds), then ungrouped feeds. Every entry has an icon and the button shows the current one |
+| Move a feed into a folder | *Settings → Feeds* → folder icon on the row → pick a folder (or **No folder**) |
+| Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins |
 | Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
-| Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
+| Delete a feed | *Settings → Feeds* → trash icon on the row → click again to confirm |
 | Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
-| Select feeds in bulk | tick the checkbox at the start of a row; the toolbar reports *N selected* |
-| Move feeds | in *Settings → Feeds*, tick one or more rows and press **Move**, or drag a row's handle onto a folder header |
-| Settings | gear icon: content typography (theme, font, size, spacing, margins), refresh interval, bulk add, feed removal, OPML |
+| Settings | gear icon: reading behaviour, feed management (folder picker, edit, pause, delete), bulk add, OPML, backend status |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
 Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.
 
-Content settings under *Settings → Content* are dropdowns, and every one of them maps to a
-stored preference: theme (`reader_theme`), font (`font_family` + `serif`), text size
-(`font_scale`, 80–160 %), line spacing (`line_height`) and side margins (`reader_padding`,
-60–180 %). The font list is filtered against `Qt.fontFamilies()`, so a family that is not
-installed never appears. The same five settings are also available while reading, from the
-`format-text` menu in the reader toolbar; both surfaces write the same preferences through
-`Typography.js`, so they cannot drift.
+Typography lives in the reader only: the `Text` button at the end of the toolbar opens a menu of
+five submenus (theme, font, size, line spacing, margins), each carrying its own icon and a
+checkmark on the active value. There is no typography in the settings sheet, so the two can no
+longer disagree. Every entry maps to a stored preference: theme (`reader_theme`), font
+(`font_family` + `serif`), text size (`font_scale`, 80–160 %), line spacing (`line_height`) and
+side margins (`reader_padding`, 60–180 %). The font list is filtered against `Qt.fontFamilies()`,
+so a family that is not installed never appears; `Typography.js` holds the tables.
 
 ### Following a site
 
@@ -179,7 +178,6 @@ https://github.com/kde/plasma-desktop/releases.atom
 ```
 plasmoid/io.github.infidel.newscurator/   Plasma applet (QML only)
   contents/ui/main.qml                    PlasmoidItem, state + API orchestration
-  contents/ui/FeedSidebar.qml             feed/folder tree with unread counts
   contents/ui/ArticleList.qml             list, filters, search, infinite scroll
   contents/ui/ReaderView.qml              block renderer + in-reader typography menu
   contents/ui/AddFeedSheet.qml            add-feed overlay
@@ -231,6 +229,7 @@ POST /api/feeds               {"url": "...", "folder": "..."}
 POST /api/feeds/delete        {"id": 1}
 POST /api/feeds/update        {"id": 1, "title": "...", "folder": "...", "enabled": 1}
 POST /api/feeds/move          {"ids": [1, 2], "folder": "Tech"} → {"ok", "moved", "folder", "state"}
+                              (API-only: the applet moves one feed at a time via /api/feeds/update)
 POST /api/feeds/update        {"id": 1, "url": "https://..."} — re-probes, then retargets
 POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
 POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
@@ -275,7 +274,8 @@ Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit e
 
 - Extraction is heuristic. Paywalled or JS-only pages fall back to the feed's own summary
   content and the reader says so ("Partial extraction"); the browser button is always there.
-- Mark-all-read has no bulk undo — it asks for a second click within 5 seconds.
+- Mark-all-read asks for confirmation in a dialog, then keeps an *Undo* in the notice banner for
+  9 seconds; the undo only restores what that action changed.
 - The applet keeps the last 300 items per feed (`max_items_per_feed`).
 - The systemd unit runs with `ProtectHome=read-only`; `~/Downloads`, `~/Documents` and
   `~/Desktop` are writable for OPML exports, anything else falls back to the app data folder.

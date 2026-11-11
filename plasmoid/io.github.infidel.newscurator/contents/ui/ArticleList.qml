@@ -22,9 +22,157 @@ Item {
     function feedIcon(feedId) {
         return iconFor ? (iconFor(feedId) || "") : ""
     }
+
+    // ------------------------------------------------------------- scope helpers
+    function isFeedScope() {
+        return selectedFeedId > 0
+    }
+
+    // The button carries the icon of whatever is being listed, so the current source is readable
+    // without opening the menu.
+    function scopeIconName() {
+        if (isFeedScope())
+            return ""
+        if (selectedFolder.length > 0)
+            return "folder"
+        if (view === "starred")
+            return "rating"
+        if (view === "all")
+            return "view-list-details"
+        return "mail-unread"
+    }
+
+    function scopeIconSource() {
+        if (!isFeedScope())
+            return ""
+        var uri = feedIcon(selectedFeedId)
+        return uri.length > 0 ? uri : ""
+    }
+
+    function scopeFallbackIconName() {
+        return isFeedScope() && feedIcon(selectedFeedId).length === 0 ? "application-rss+xml" : ""
+    }
+
+    function folderFeeds(name) {
+        var out = []
+        for (var i = 0; i < feeds.length; ++i) {
+            if (String(feeds[i].folder || "") === name)
+                out.push(feeds[i])
+        }
+        return out
+    }
+
+    function looseFeedList() {
+        return folderFeeds("")
+    }
+
+    function feedUnread(feed) {
+        return typeof feed.unread === "number" ? feed.unread : 0
+    }
+
+    function folderUnread(name) {
+        var list = folderFeeds(name)
+        var sum = 0
+        for (var i = 0; i < list.length; ++i)
+            sum += feedUnread(list[i])
+        return sum
+    }
+
+    function isSmartSelected(kind) {
+        return selectedFeedId === 0 && selectedFolder.length === 0 && view === kind
+    }
+
+    // The source menu is rebuilt from scratch on every open: a Repeater delegate must be an Item
+    // and a submenu is a Popup, so the rows are created in JS. A fresh menu also keeps the bold
+    // state truthful without a long-lived binding. The menu itself is JS-owned, which is what makes
+    // destroying it (together with the rows Qt generates for submenus) possible.
+    property var scopeMenu: null
+
+    function newMenuObject(source, parent) {
+        return Qt.createQmlObject("import QtQuick; import org.kde.plasma.components as PC3; "
+                                  + source, parent)
+    }
+
+    function addSourceRow(menu, text, iconName, iconSource, bold, kind, value) {
+        var row = newMenuObject("PC3.MenuItem { }", menu)
+        row.text = text
+        row.icon.name = iconName
+        row.icon.source = iconSource
+        row.font.bold = bold
+        row.triggered.connect(function () { listRoot.sourceSelected(kind, value) })
+        menu.addItem(row)
+    }
+
+    function addSourceSeparator(menu) {
+        menu.addItem(newMenuObject("PC3.MenuSeparator { }", menu))
+    }
+
+    function addFolderSubmenu(menu, name) {
+        var sub = newMenuObject("PC3.Menu { }", menu)
+        sub.title = name
+        sub.icon.name = "folder"
+
+        var head = newMenuObject("PC3.MenuItem { }", sub)
+        head.text = i18n("Everything in %1", name)
+        head.icon.name = "folder-open"
+        head.triggered.connect(function () { listRoot.sourceSelected("folder", name) })
+        sub.addItem(head)
+
+        var list = folderFeeds(name)
+        if (list.length > 0)
+            sub.addItem(newMenuObject("PC3.MenuSeparator { }", sub))
+        for (var i = 0; i < list.length; ++i) {
+            var feed = list[i]
+            var uri = feedIcon(feed.id)
+            var row = newMenuObject("PC3.MenuItem { }", sub)
+            row.text = feed.title || feed.url
+            row.icon.name = uri.length > 0 ? "" : "application-rss+xml"
+            row.icon.source = uri
+            row.font.bold = selectedFeedId === feed.id
+            row.triggered.connect((function (id) {
+                return function () { listRoot.sourceSelected("feed", String(id)) }
+            })(feed.id))
+            sub.addItem(row)
+        }
+
+        // addMenu() wraps the Menu in a generated row that carries the title and icon.
+        menu.addMenu(sub)
+    }
+
+    function openSources() {
+        if (scopeMenu) {
+            scopeMenu.close()
+            scopeMenu.destroy()
+            scopeMenu = null
+        }
+        var menu = newMenuObject("PC3.Menu { }", listRoot)
+        addSourceRow(menu, i18n("Unread"), "mail-unread", "", isSmartSelected("unread"),
+                     "view", "unread")
+        addSourceRow(menu, i18n("Starred"), "rating", "", isSmartSelected("starred"),
+                     "view", "starred")
+        addSourceRow(menu, i18n("All items"), "view-list-details", "", isSmartSelected("all"),
+                     "view", "all")
+        if (folders.length > 0)
+            addSourceSeparator(menu)
+        for (var i = 0; i < folders.length; ++i)
+            addFolderSubmenu(menu, String(folders[i]))
+        var loose = looseFeedList()
+        if (loose.length > 0)
+            addSourceSeparator(menu)
+        for (var j = 0; j < loose.length; ++j) {
+            var feed = loose[j]
+            var uri = feedIcon(feed.id)
+            addSourceRow(menu, feed.title || feed.url,
+                         uri.length > 0 ? "" : "application-rss+xml", uri,
+                         selectedFeedId === feed.id, "feed", String(feed.id))
+        }
+        scopeMenu = menu
+        // Left edge under the button: a centred popup is what made the old menu hard to read.
+        menu.popup(sourceButton, 0, sourceButton.height)
+    }
+
     property string selectionTitle: ""
     property string thumbBase: ""
-    property bool sidebarVisible: true
     property int selectedFeedId: 0
     property string selectedFolder: ""
     property var feeds: []
@@ -38,7 +186,6 @@ Item {
     signal markAllRequested()
     signal addFeedRequested()
     signal settingsRequested()
-    signal sidebarToggled()
     signal sourceSelected(string kind, string value)
     signal loadMoreRequested()
 
@@ -60,76 +207,20 @@ Item {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing / 2
 
-                PlasmaComponents3.ToolButton {
-                    icon.name: listRoot.sidebarVisible ? "view-split-left-right" : "application-menu"
-                    display: AbstractButton.IconOnly
-                    onClicked: listRoot.sidebarToggled()
-                    PlasmaComponents3.ToolTip {
-                        text: listRoot.sidebarVisible ? i18n("Hide feeds") : i18n("Show feeds")
-                    }
-                }
-
                 // The current scope doubles as the filter control, so the way to change what the
                 // list shows is visible instead of hidden behind an unlabelled icon.
                 PlasmaComponents3.ToolButton {
                     id: sourceButton
+                    objectName: "source-button"
                     Layout.fillWidth: true
                     text: listRoot.selectionTitle
-                    icon.name: "view-list-details"
+                    icon.name: listRoot.scopeIconName().length > 0
+                               ? listRoot.scopeIconName()
+                               : listRoot.scopeFallbackIconName()
+                    icon.source: listRoot.scopeIconSource()
                     display: AbstractButton.TextBesideIcon
-                    onClicked: sourceMenu.popup()
+                    onClicked: listRoot.openSources()
                     PlasmaComponents3.ToolTip { text: i18n("Filter by folder or source") }
-
-                    PlasmaComponents3.Menu {
-                        id: sourceMenu
-                        y: sourceButton.height
-
-                        PlasmaComponents3.MenuItem {
-                            text: i18n("Unread")
-                            icon.name: listRoot.view === "unread" && listRoot.selectedFeedId === 0
-                                       && listRoot.selectedFolder === "" ? "checkmark" : ""
-                            onTriggered: listRoot.sourceSelected("view", "unread")
-                        }
-                        PlasmaComponents3.MenuItem {
-                            text: i18n("Starred")
-                            icon.name: listRoot.view === "starred" ? "checkmark" : ""
-                            onTriggered: listRoot.sourceSelected("view", "starred")
-                        }
-                        PlasmaComponents3.MenuItem {
-                            text: i18n("All items")
-                            icon.name: listRoot.view === "all" && listRoot.selectedFeedId === 0
-                                       && listRoot.selectedFolder === "" ? "checkmark" : ""
-                            onTriggered: listRoot.sourceSelected("view", "all")
-                        }
-
-                        PlasmaComponents3.MenuSeparator {
-                            visible: listRoot.folders.length > 0
-                        }
-                        Repeater {
-                            model: listRoot.folders
-                            delegate: PlasmaComponents3.MenuItem {
-                                required property var modelData
-                                text: i18n("Folder: %1", String(modelData))
-                                icon.name: listRoot.selectedFolder === String(modelData)
-                                           ? "checkmark" : ""
-                                onTriggered: listRoot.sourceSelected("folder", String(modelData))
-                            }
-                        }
-
-                        PlasmaComponents3.MenuSeparator {
-                            visible: listRoot.feeds.length > 0
-                        }
-                        Repeater {
-                            model: listRoot.feeds
-                            delegate: PlasmaComponents3.MenuItem {
-                                required property var modelData
-                                text: modelData.title || modelData.url
-                                icon.name: listRoot.selectedFeedId === modelData.id
-                                           ? "checkmark" : ""
-                                onTriggered: listRoot.sourceSelected("feed", String(modelData.id))
-                            }
-                        }
-                    }
                 }
 
                 Text {
