@@ -404,6 +404,17 @@ class Handler(BaseHTTPRequestHandler):
                 folder = body.get("folder")
                 changed = store.mark_all_read(int(feed_id) if feed_id else None, folder or None)
                 self._send(200, {"ok": True, "changed": changed, "state": self.api.state()})
+            elif route == "/api/mark-unread":
+                feed_id = body.get("feed")
+                folder = body.get("folder")
+                ids = body.get("ids")
+                if ids is not None and not isinstance(ids, list):
+                    self._send(400, {"error": "ids must be a list"})
+                    return
+                changed = store.mark_unread(int(feed_id) if feed_id else None,
+                                            folder or None,
+                                            [int(i) for i in ids] if ids else None)
+                self._send(200, {"ok": True, "changed": changed, "state": self.api.state()})
             elif route == "/api/refresh":
                 feed_id = body.get("feed")
                 started = self.api.refresh.start(int(feed_id) if feed_id else None)

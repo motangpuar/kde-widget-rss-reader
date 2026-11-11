@@ -64,6 +64,7 @@ Uninstall (keeps your feeds and read state):
 | Open in browser | `internet-services` icon, list row, or reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
 | Mark all read | double-click the read icon (5 s confirmation window) |
+| Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
 | Delete a feed | hover the feed in the sidebar → trash icon → click again to confirm |
 | Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
 | Settings | gear icon: theme, text size, serif, refresh interval, bulk add, feed removal, OPML |
@@ -219,6 +220,7 @@ POST /api/feeds/update        {"id": 1, "title": "...", "folder": "...", "enable
 POST /api/feeds/update        {"id": 1, "url": "https://..."} — re-probes, then retargets
 POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
 POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
+POST /api/mark-unread         {} / {"feed": 1} / {"folder": "Tech"} / {"ids": [1, 2]}
 POST /api/refresh             {} or {"feed": 1}
 POST /api/prefs               {"reader_theme": "sepia", ...}
 POST /api/opml                {"opml": "<opml>...</opml>"}
@@ -228,7 +230,7 @@ POST /api/extract             {"id": 1} — force re-extraction
 ## Development
 
 ```bash
-python3 -m unittest discover -s backend/tests -t backend -v   # 41 tests
+python3 -m unittest discover -s backend/tests -t backend -v   # 43 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
 ```

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 APP = "knews-curator"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 DEFAULT_PORT = 8770
 USER_AGENT = (
     f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "

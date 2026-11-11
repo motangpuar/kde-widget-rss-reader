@@ -287,6 +287,29 @@ class Store:
             self.db.commit()
             return cur.rowcount
 
+    def mark_unread(self, feed_id: int | None = None, folder: str | None = None,
+                    ids: list[int] | None = None) -> int:
+        """Undo a mark-all sweep.
+
+        Scope precedence: explicit item ids, then one feed, then one folder, then everything.
+        """
+        sql = "UPDATE items SET read = 0 WHERE read = 1"
+        params: list[Any] = []
+        if ids:
+            marks = ",".join("?" * len(ids))
+            sql += f" AND id IN ({marks})"
+            params.extend(int(i) for i in ids)
+        elif feed_id:
+            sql += " AND feed_id = ?"
+            params.append(feed_id)
+        elif folder:
+            sql += " AND feed_id IN (SELECT id FROM feeds WHERE folder = ?)"
+            params.append(folder)
+        with self._lock:
+            cur = self.db.execute(sql, params)
+            self.db.commit()
+            return cur.rowcount
+
     def counts(self) -> dict[str, int]:
         with self._lock:
             unread = int(self.db.execute("SELECT COUNT(*) FROM items WHERE read = 0").fetchone()[0])

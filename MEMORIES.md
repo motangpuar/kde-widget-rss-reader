@@ -56,6 +56,11 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 4. Consider capping stored `content` HTML per item and pruning old rows (DB growth).
 
 ## Chronological History
+- 2026-11-11: `POST /api/mark-unread` (`db.mark_unread`, scope: ids → feed → folder → all) plus an
+  *Undo* button in the 9 s notice banner, so a mark-all sweep is reversible; the accidental
+  LWN sweep was restored on the live DB (15 items → unread 159). Version 1.3.0.
+- 2026-11-11: `main.qml` needed `import org.kde.plasma.components as PlasmaComponents3`; without it
+  the whole applet failed to load (`PlasmaComponents3 is neither a type nor a namespace`).
 - 2026-11-11: settings v2 — inline `component Section` cards, card sized
   `min(window-2*gu, 34gu)` x `min(window-2*gu, 42gu)` with equal edge margins, ScrollView
   `contentWidth: availableWidth` (old `width: sheet.width - 2*gu` overflowed the card),

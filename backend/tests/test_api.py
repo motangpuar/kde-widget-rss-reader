@@ -263,6 +263,47 @@ class ApiTests(unittest.TestCase):
         _, unread = self.get("/api/items?view=unread")
         self.assertEqual(unread["total"], 0)
 
+    def test_mark_unread_undoes_a_sweep(self):
+        feed_id = self.add_feed()
+        _, listing = self.get("/api/items?view=unread")
+        self.assertEqual(listing["total"], 2)
+        status, body = self.post("/api/mark-all", {"feed": feed_id})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["changed"], 2)
+
+        status, body = self.post("/api/mark-unread", {"feed": feed_id})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["changed"], 2)
+        self.assertEqual(body["state"]["counts"]["unread"], 2)
+        _, unread = self.get("/api/items?view=unread")
+        self.assertEqual(unread["total"], 2)
+
+        # Nothing left to flip back.
+        status, body = self.post("/api/mark-unread", {"feed": feed_id})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["changed"], 0)
+
+    def test_mark_unread_by_ids_and_scope_validation(self):
+        feed_id = self.add_feed()
+        _, listing = self.get("/api/items?view=unread")
+        first_id = listing["items"][0]["id"]
+        self.post("/api/mark-all", {})
+        status, body = self.post("/api/mark-unread", {"ids": [first_id]})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["changed"], 1)
+        self.assertEqual(body["state"]["counts"]["unread"], 1)
+
+        status, body = self.post("/api/mark-unread", {"ids": "1,2"})
+        self.assertEqual(status, 400)
+        self.assertIn("ids must be a list", body["error"])
+
+        self.post("/api/mark-all", {})
+        status, body = self.post("/api/mark-unread", {"folder": "Tech"})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["changed"], 2)
+        self.assertEqual(body["state"]["counts"]["unread"], 2)
+        self.assertEqual([f["id"] for f in body["state"]["feeds"]], [feed_id])
+
     def test_prefs_roundtrip_and_validation(self):
         status, body = self.post("/api/prefs", {"prefs": {"reader_theme": "sepia", "bogus": 1}})
         self.assertEqual(status, 200)

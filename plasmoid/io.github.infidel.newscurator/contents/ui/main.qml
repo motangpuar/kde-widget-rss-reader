@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.plasmoid
+import org.kde.plasma.components as PlasmaComponents3
 import "Api.js" as Api
 
 PlasmoidItem {
@@ -33,6 +34,8 @@ PlasmoidItem {
     property bool backendUp: false
     property string statusMessage: ""
     property string notice: ""
+    // Set while a mark-all sweep can still be undone from the notice banner.
+    property var undoMarkAll: null
     property bool refreshRunning: false
     property bool showSidebar: true
     property bool addFeedOpen: false
@@ -69,7 +72,7 @@ PlasmoidItem {
     Timer {
         id: noticeTimer
         interval: 9000
-        onTriggered: root.notice = ""
+        onTriggered: { root.notice = ""; root.undoMarkAll = null }
     }
 
     Timer {
@@ -261,10 +264,36 @@ PlasmoidItem {
         var body = selectedFeedId > 0 ? { "feed": selectedFeedId }
                  : selectedFolder ? { "folder": selectedFolder } : {}
         Api.request("POST", "/api/mark-all", body, function (status, data) {
-            if (status === 200) {
-                loadItems(true)
-                refreshCounts()
+            if (status !== 200 || !data) {
+                fail(status)
+                return
             }
+            loadItems(true)
+            refreshCounts()
+            if (data.changed > 0) {
+                undoMarkAll = body
+                showNotice(data.changed === 1 ? i18n("Marked 1 item read")
+                                              : i18n("Marked %1 items read", data.changed))
+            } else {
+                undoMarkAll = null
+                showNotice(i18n("Nothing left to mark read"))
+            }
+        })
+    }
+
+    function undoMarkAllRead() {
+        if (!undoMarkAll)
+            return
+        Api.request("POST", "/api/mark-unread", undoMarkAll, function (status, data) {
+            undoMarkAll = null
+            if (status !== 200 || !data) {
+                fail(status)
+                return
+            }
+            loadItems(true)
+            refreshCounts()
+            showNotice(data.changed === 1 ? i18n("Restored 1 unread item")
+                                          : i18n("Restored %1 unread items", data.changed))
         })
     }
 
@@ -606,8 +635,10 @@ PlasmoidItem {
             anchors.right: parent.right
             anchors.margins: Kirigami.Units.smallSpacing
             width: Math.min(parent.width - 2 * Kirigami.Units.smallSpacing,
-                            noticeText.implicitWidth + Kirigami.Units.gridUnit * 2.5)
-            height: noticeText.implicitHeight + Kirigami.Units.smallSpacing * 2
+                            noticeText.implicitWidth + undoButton.implicitWidth
+                            + Kirigami.Units.gridUnit * 3)
+            height: Math.max(noticeText.implicitHeight, undoButton.implicitHeight)
+                    + Kirigami.Units.smallSpacing * 2
             radius: Kirigami.Units.smallSpacing
             color: Kirigami.Theme.backgroundColor
             border.width: 1
@@ -617,19 +648,33 @@ PlasmoidItem {
 
             Behavior on opacity { NumberAnimation { duration: 120 } }
 
-            Text {
-                id: noticeText
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
+            RowLayout {
+                anchors.fill: parent
                 anchors.leftMargin: Kirigami.Units.smallSpacing * 2
-                anchors.rightMargin: Kirigami.Units.smallSpacing * 2
-                text: root.notice
-                color: Kirigami.Theme.textColor
-                wrapMode: Text.Wrap
-                maximumLineCount: 4
-                elide: Text.ElideRight
-                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.75)
+                anchors.rightMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                Text {
+                    id: noticeText
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
+                    text: root.notice
+                    color: Kirigami.Theme.textColor
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 4
+                    elide: Text.ElideRight
+                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.75)
+                }
+
+                PlasmaComponents3.Button {
+                    id: undoButton
+                    Layout.alignment: Qt.AlignVCenter
+                    visible: root.undoMarkAll !== null
+                    text: i18n("Undo")
+                    icon.name: "edit-undo"
+                    // The banner is short-lived, so keep the undo tap cheap and single.
+                    onClicked: root.undoMarkAllRead()
+                }
             }
         }
     }
