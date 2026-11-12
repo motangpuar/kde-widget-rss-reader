@@ -125,6 +125,20 @@ out=$(bootstrap --port "$PORT" --restart) || fail "switching back to a port fail
 [ -z "$(probe_sock "$SOCK")" ] || fail "socket still answers after switching back"
 printf '  endpoint changes replace the daemon instead of adding one\n'
 
+printf '== widget default socket (empty --socket)\n'
+# The widget passes --socket '' when the configured path is the per-session default, and it calls
+# plain start (no --restart) on load. A port daemon is still running here, so this exercises both
+# the empty-argument path and following the published endpoint to stop the old daemon.
+out=$(bootstrap --port "$PORT" --restart) || fail "restart before the default-socket test failed: $out"
+out=$(bootstrap --socket '') || fail "empty --socket rejected: $out"
+grep -q BOOTSTRAP_STARTED <<<"$out" || fail "empty --socket did not start a daemon: $out"
+[ -z "$(probe_port "$PORT")" ] || fail "old port daemon survived the switch to the default socket"
+[ -n "$(probe_sock "$SOCK")" ] || fail "empty --socket did not use $SOCK"
+[ "$(field "$(cat "$ENDPOINT")" transport)" = "socket" ] || fail "endpoint file is not in socket mode"
+[ "$(pgrep -fc "$APP" || true)" = "1" ] || fail "expected exactly one daemon after the default-socket switch"
+printf '  empty --socket resolved to %s, previous port daemon stopped\n' "$SOCK"
+out=$(bootstrap --stop) || fail "--stop after the default-socket test failed: $out"
+
 printf '== socket mode\n'
 out=$(bootstrap --port "$PORT" --stop) || fail "--stop failed: $out"
 out=$(bootstrap --socket "$SOCK") || fail "socket bootstrap failed: $out"
@@ -163,8 +177,14 @@ done
 out=$(bootstrap --port "$PORT" --stop) || fail "--stop failed: $out"
 [ -n "$(python3 "$FOREIGN/knewsd.pyz" --probe --port "$PORT" 2>/dev/null || true)" ] \
     || fail "--stop killed a backend it did not start"
+# Switching to the socket default must not start a second backend beside it: the foreign daemon
+# keeps its endpoint, so the bootstrap attaches to it (this is the systemd-unit case too).
+out=$(bootstrap --socket '') || fail "socket start next to a foreign daemon failed: $out"
+grep -q BOOTSTRAP_ALREADY <<<"$out" || fail "expected BOOTSTRAP_ALREADY, got: $out"
+[ -z "$(probe_sock "$SOCK")" ] || fail "a second backend was started on the socket"
+[ "$(pgrep -fc "$APP" || true)" = "0" ] || fail "our backend was started next to the foreign one"
 python3 "$FOREIGN/knewsd.pyz" --shutdown --port "$PORT" >/dev/null 2>&1 || true
-printf '  foreign backend untouched\n'
+printf '  foreign backend untouched, socket start attached instead of stacking\n'
 
 printf '== stop\n'
 out=$(bootstrap --port "$PORT") || fail "final bootstrap failed: $out"

@@ -6,9 +6,10 @@
   <group name="General">
     <!-- How clients reach the backend. The widget itself always uses loopback HTTP (QML has no
          unix-socket transport); in socket mode the daemon also publishes an ephemeral loopback
-         port in $XDG_RUNTIME_DIR/knews-curator/endpoint.json. -->
+         port in $XDG_RUNTIME_DIR/knews-curator/endpoint.json. Socket is the default: no TCP
+         listener exists at all unless the port mode is chosen deliberately. -->
     <entry name="connection" type="Enum">
-      <default>port</default>
+      <default>socket</default>
       <choices>
         <choice name="port"/>
         <choice name="socket"/>

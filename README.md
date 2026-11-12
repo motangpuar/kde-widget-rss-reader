@@ -8,7 +8,8 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
 ## What you get
 
 - **Plasma 6 applet** (`io.github.infidel.newscurator`) — three panes: feeds, article list, reader.
-- **Local daemon** (`knewsd`) — stdlib-only Python, SQLite, JSON over `127.0.0.1:8770`.
+- **Local daemon** (`knewsd`) — stdlib-only Python, SQLite, JSON over a unix socket by default
+  (`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock`) or a loopback port if you prefer TCP.
 - **Reader view** — server-side extraction into structured blocks (paragraphs with inline
   bold/italic/links, headings, lists, quotes, code, images) rendered by QML; not HTML in a
   WebView, so it stays fast, theme-consistent and offline-readable.
@@ -59,17 +60,23 @@ server, not a system service:
   15 minutes without a request (`KNEWS_IDLE_EXIT`, `0` disables it — the systemd unit sets 0
   because there the OS owns the lifetime).
 
-The widget talks HTTP over loopback. *Settings → Backend → Connection* can switch the daemon to
-a **unix socket** (`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock` by default) for any other client;
-because QML has no unix-socket transport, socket mode also publishes an ephemeral loopback port
-in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`, which is the channel the widget itself uses.
-The same card has **Restart backend** and **Stop backend**, so a GUI-only install never needs a
-terminal.
+**Transport: unix socket by default.** The daemon listens on
+`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock` — no TCP listener exists unless you choose the port
+mode in *Settings → Backend → Connection*. Because QML has no unix-socket transport, the daemon
+also publishes an ephemeral **loopback** port in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`
+and prints it (`BOOTSTRAP_ENDPOINT <json>`) for the widget, so both channels always work.
+The same card has the socket path, **Restart backend** and **Stop backend**, so a GUI install
+never needs a terminal.
 
 ```bash
 # equivalent command line, for debugging or scripted restarts:
-sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --port 8770
-sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --stop
+BOOT=~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh
+sh "$BOOT" --socket ''        # the widget default: unix socket at the runtime path
+sh "$BOOT" --port 8770        # loopback TCP instead
+sh "$BOOT" --stop             # follows whatever endpoint is published, no arguments needed
+
+# talking to a socket-mode daemon by hand:
+python3 ~/.local/share/knews-curator/app/knewsd.pyz --probe --socket "$XDG_RUNTIME_DIR/knews-curator/knewsd.sock"
 ```
 
 The bootstrap is idempotent: it answers `/api/health` first, so it does nothing when a backend
@@ -409,7 +416,10 @@ Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit e
 - The applet keeps the last 300 items per feed (`max_items_per_feed`).
 - The systemd unit runs with `ProtectHome=read-only`; `~/Downloads`, `~/Documents` and
   `~/Desktop` are writable for OPML exports, anything else falls back to the app data folder.
-- The port is not exposed in the applet UI (it is an install-time detail, default `8770`).
+- The port is not a fixed constant any more: socket mode publishes an ephemeral loopback port
+  per daemon start, and the *port* mode uses the configured `8770` (editable in Settings →
+  Backend). Scripts that need `http://127.0.0.1:8770` must either select the port mode or read
+  `endpoint.json`.
   To change it, edit `contents/config/main.xml`'s default or `Plasmoid.configuration.port`,
   then restart the unit:
   `systemctl --user restart knewsd`.

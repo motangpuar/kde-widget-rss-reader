@@ -133,17 +133,19 @@ grep -q "none installed" "$WORK/install.log" \
 grep -q "systemctl --user" "$WORK/install.log" \
     && { echo "error: the default install touched systemd" >&2; exit 1; }
 
-# Now do what the widget does: run bootstrap.sh, then stop it the way the widget would.
-BOOT=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --port 8770; true")
-HEALTH=$(RUN "curl -fsS http://127.0.0.1:8770/api/health")
+# Now do what the widget does: run bootstrap.sh with the default transport (unix socket, empty
+# path), then stop it the way the widget would.
+BOOT=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --socket ''; true")
+LPORT=$(sed -n 's/.*"port":[ ]*\([0-9][0-9]*\).*/\1/p' <<<"$BOOT" | head -1)
+HEALTH=$(RUN "curl -fsS http://127.0.0.1:$LPORT/api/health")
 STOPPED=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --stop; true")
-GONE=$(RUN "curl -fsS -m 2 http://127.0.0.1:8770/api/health 2>/dev/null || echo none")
+GONE=$(RUN "curl -fsS -m 2 http://127.0.0.1:$LPORT/api/health 2>/dev/null || echo none")
 INSTALLED_QML=$(RUN "md5sum \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/ui/main.qml" \
     | cut -d' ' -f1)
 EXPECTED_QML=$(md5sum "$DL/news-curator-$VERSION/plasmoid/$PLASMOID_ID/contents/ui/main.qml" \
     | cut -d' ' -f1)
-printf '  bootstrap: %s\n  health:    %s\n' \
-    "$(grep -o 'BOOTSTRAP_[A-Z]* [0-9]*' <<<"$BOOT" | tail -1)" "$HEALTH"
+printf '  bootstrap: %s (socket default, widget port %s)\n  health:    %s\n' \
+    "$(grep -o 'BOOTSTRAP_[A-Z]* [0-9]*' <<<"$BOOT" | tail -1)" "$LPORT" "$HEALTH"
 printf '  stop:      %s\n  after:     %s\n' \
     "$(grep -o 'BOOTSTRAP_[A-Z]*' <<<"$STOPPED" | tail -1)" "$GONE"
 printf '  installed qml: %s\n  expected  qml: %s\n' "$INSTALLED_QML" "$EXPECTED_QML"
@@ -154,13 +156,16 @@ grep -q "\"version\": \"$VERSION\"" <<<"$HEALTH" \
 grep -q "BOOTSTRAP_STOPPED" <<<"$STOPPED" \
     || { echo "error: the widget bootstrap did not stop the backend" >&2; exit 1; }
 [ "$GONE" = "none" ] || { echo "error: the backend survived --stop ($GONE)" >&2; exit 1; }
+grep -q "\"transport\": \"socket\"" <<<"$HEALTH" \
+    || { echo "error: the default transport is not the unix socket ($HEALTH)" >&2; exit 1; }
 [ "$INSTALLED_QML" = "$EXPECTED_QML" ] \
     || { echo "error: installed applet differs from the release contents" >&2; exit 1; }
 
 # Hand the backend back to the widget: the stop above is the widget's own exit path, and a live
 # desktop should not be left offline by a packaging test.
-RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --port 8770 >/dev/null 2>&1 || true"
-RESTORED=$(RUN "curl -fsS -m 3 http://127.0.0.1:8770/api/health 2>/dev/null || echo none")
+RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --socket '' >/dev/null 2>&1 || true"
+sleep 1
+RESTORED=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --socket '' 2>/dev/null | grep -c BOOTSTRAP_ALREADY")
 printf '  restored:  %s\n' "$RESTORED"
 
 step "result"

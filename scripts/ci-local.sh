@@ -84,6 +84,21 @@ sys.exit(bad)
 PY
 printf '  no duplicate root handlers\n'
 
+step "default transport"
+python3 - <<'PY'
+import pathlib, re, sys
+cfg = pathlib.Path("plasmoid/io.github.infidel.newscurator/contents/config/main.xml").read_text()
+block = re.search(r'<entry name="connection".*?</entry>', cfg, re.S)
+if not block or "<default>socket</default>" not in block.group(0):
+    sys.exit("connection default is not socket")
+boot = pathlib.Path(
+    "plasmoid/io.github.infidel.newscurator/contents/backend/bootstrap.sh").read_text()
+line = [l for l in boot.splitlines() if "--socket)" in l]
+if not line or "${2?--socket" not in line[0]:
+    sys.exit("--socket must accept an empty value (the per-session default path)")
+print("  socket is the default transport; empty --socket accepted")
+PY
+
 step "metadata"
 python3 scripts/check-metadata.py
 

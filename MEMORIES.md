@@ -168,6 +168,17 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 socket default follow-ups (1.9.0): `activePort` starts at 0 in socket mode so the
+  widget no longer fires a request at the unused 8770 before the endpoint line, `channelPort`
+  separates the widget's HTTP channel from the configured port (Settings still edits the latter),
+  and a daemon we may not stop (systemd unit / foreign) is now **adopted** (`BOOTSTRAP_ALREADY`)
+  instead of being started next to on a second endpoint.
+- 2026-11-12 socket is the default transport (1.9.0): `main.xml` default choice is now `socket`,
+  and two bootstrap bugs surfaced with it — `${2:?}` rejected the widget's `--socket ''` (empty is
+  the per-session default, so `${2?}`), and a plain start (no `--restart`) did not follow the
+  published endpoint, so switching modes left the old daemon holding the `flock`. New
+  `test-bootstrap.sh` section "widget default socket (empty --socket)" proves both: empty argument,
+  old port daemon stopped, socket path used, exactly one daemon.
 - 2026-11-12 startup blink fixed (`main.qml`): the pane blanked 2-3x on load because
   `loadItems(true)` cleared `items` before the payload and four separate triggers (initial load,
   endpoint report, retry poll, pollRefresh) each fired a full reload. Now: same-view reloads swap

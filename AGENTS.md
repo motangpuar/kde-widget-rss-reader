@@ -81,10 +81,11 @@ supervisor per deployment:
 - **Single instance** = `flock` on `$XDG_RUNTIME_DIR/knews-curator/knewsd.lock` **and** bind of
   the configured endpoint **and** an identity check over `/api/health` (`ok`, `version`, `pid`)
   before a client trusts a listener. A bound port alone proves nothing.
-- **Transports**: HTTP over loopback (what QML uses — `XMLHttpRequest` cannot speak HTTP over
-  `AF_UNIX`) or a unix socket (`--socket PATH`, port `0`). Socket mode publishes both channels in
-  `$XDG_RUNTIME_DIR/knews-curator/endpoint.json` and prints `BOOTSTRAP_ENDPOINT <json>` for the
-  widget. Never a TCP port on a non-loopback address.
+- **Transports**: **unix socket by default** (`--socket ''` resolves to the runtime path;
+  `connection=socket` in `contents/config/main.xml`), HTTP over loopback on request (`--port`).
+  QML cannot speak HTTP over `AF_UNIX`, so socket mode also binds an ephemeral loopback port and
+  publishes both channels in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`, printing
+  `BOOTSTRAP_ENDPOINT <json>` for the widget. Never a TCP port on a non-loopback address.
 - **Restart/stop are user-facing**: *Settings → Backend* and `bootstrap.sh --restart|--stop`;
   `install.sh` calls `--stop` before starting the unit to hand the port over.
 - **systemd hardening gotcha**: `ProtectSystem=strict` makes `$XDG_RUNTIME_DIR` read-only, so the

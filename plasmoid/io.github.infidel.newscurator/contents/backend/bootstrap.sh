@@ -27,7 +27,8 @@ IDLE=${KNEWS_IDLE_EXIT:-900}
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) MODE=port; PORT=${2:?--port needs a value}; SOCKET=""; shift 2 ;;
-        --socket) MODE=socket; SOCKET=${2:?--socket needs a value}; shift 2 ;;
+        # Empty is valid here: it means the per-session default socket path (RUNTIME/knewsd.sock).
+        --socket) MODE=socket; SOCKET=${2?--socket needs a value}; shift 2 ;;
         --idle-exit) IDLE=${2:?--idle-exit needs a value}; shift 2 ;;
         --restart) RESTART=1; shift ;;
         --stop) STOP=1; shift ;;
@@ -194,6 +195,27 @@ report_endpoint() {
 # The systemd unit is untouched here — stop_daemon refuses daemons that are not our zipapp.
 if [ "$RESTART" -eq 1 ]; then
     stop_daemon
+elif ! probe >/dev/null 2>&1; then
+    # Nothing answers on the requested endpoint. If our daemon is published somewhere else the
+    # endpoint moved (the user switched port or transport), and the single-instance lock would
+    # make the new daemon refuse to start — follow the published endpoint and stop that one.
+    if PUBLISHED=$(published_endpoint); then
+        KIND=${PUBLISHED%%	*}
+        VALUE=${PUBLISHED#*	}
+        if [ "$KIND" != "$(current_kind)" ] || [ "$VALUE" != "$(current_value)" ]; then
+            printf 'bootstrap: endpoint moved to %s %s, stopping the previous daemon\n' \
+                "$(current_kind)" "$(current_value)"
+            stop_daemon
+            # A daemon we may not stop (systemd unit, foreign listener) still holds the published
+            # endpoint. Attach to it instead of starting a second backend next to it.
+            if HEALTH=$(probe_at "$KIND" "$VALUE" 2>/dev/null); then
+                printf 'bootstrap: attaching to the daemon that owns %s %s\n' "$KIND" "$VALUE"
+                report_endpoint "$HEALTH"
+                printf 'BOOTSTRAP_ALREADY\n'
+                exit 0
+            fi
+        fi
+    fi
 fi
 
 if HEALTH=$(probe 2>/dev/null); then

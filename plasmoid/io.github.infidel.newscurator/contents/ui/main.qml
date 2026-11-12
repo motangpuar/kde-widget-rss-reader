@@ -18,13 +18,22 @@ PlasmoidItem {
     readonly property string configuredSocket: Plasmoid.configuration.socketPath || ""
     // Loopback channel the widget itself talks to; in socket mode the daemon publishes an
     // ephemeral port, which the launcher reports back.
-    property int activePort: configuredPort
+    // 0 until the launcher reports the published port: in socket mode there is no port to guess,
+    // so the widget must not fire requests at the default one and paint an offline banner first.
+    property int activePort: connectionMode === "socket" ? 0 : configuredPort
+    // Port the widget itself talks to; 0 = no channel yet (socket mode before the endpoint line).
+    readonly property int channelPort: activePort > 0
+                                       ? activePort
+                                       : (connectionMode === "socket" ? 0 : configuredPort)
+    // Configured port, for the Settings field and the endpoint text.
     readonly property int backendPort: activePort > 0 ? activePort : configuredPort
     readonly property string backendEndpointText: {
         if (connectionMode === "socket") {
             var path = configuredSocket.length > 0 ? configuredSocket
                                                    : "$XDG_RUNTIME_DIR/knews-curator/knewsd.sock"
-            return i18n("unix socket %1 — widget channel 127.0.0.1:%2", path, backendPort)
+            return channelPort > 0
+                ? i18n("unix socket %1 — widget channel 127.0.0.1:%2", path, channelPort)
+                : i18n("unix socket %1", path)
         }
         return i18n("127.0.0.1:%1", backendPort)
     }
@@ -91,8 +100,10 @@ PlasmoidItem {
 
     // ------------------------------------------------------------------ wiring
     Component.onCompleted: {
-        Api.setPort(backendPort)
-        loadState()
+        if (channelPort > 0) {
+            Api.setPort(channelPort)
+            loadState()
+        }
         // A store install has no installer: the widget starts the backend it ships. The script
         // answers /api/health first, so this is a no-op when a daemon already runs.
         backendLauncher.start()
@@ -170,11 +181,11 @@ PlasmoidItem {
         onRunningChanged: if (running) attempts = 0
     }
 
-    onBackendPortChanged: {
-        Api.setPort(backendPort)
+    onChannelPortChanged: {
+        Api.setPort(channelPort)
         // The endpoint line usually lands right after a successful sync; re-reading the state then
         // only repaints the same rows. Reload only when the previous port was wrong/offline.
-        if (!root.backendUp)
+        if (!root.backendUp && root.channelPort > 0)
             root.loadState()
     }
 
@@ -697,7 +708,8 @@ PlasmoidItem {
                 backendUp: root.backendUp
                 statusMessage: root.statusMessage
                 selectionTitle: root.selectedTitle()
-                thumbBase: "http://127.0.0.1:" + root.backendPort + "/api/thumb?id="
+                thumbBase: root.channelPort > 0
+                           ? "http://127.0.0.1:" + root.channelPort + "/api/thumb?id=" : ""
                 iconFor: (feedId) => root.feedIcon(feedId)
                 selectedFeedId: root.selectedFeedId
                 selectedFolder: root.selectedFolder
@@ -768,7 +780,7 @@ PlasmoidItem {
             backendUp: root.backendUp
             exportDir: root.exportDir
             connectionMode: root.connectionMode
-            backendPort: root.backendPort
+            backendPort: root.configuredPort
             socketPath: root.configuredSocket
             backendEndpoint: root.backendEndpointText
             onClosed: root.settingsOpen = false

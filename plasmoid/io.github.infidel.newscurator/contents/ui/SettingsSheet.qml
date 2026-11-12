@@ -14,7 +14,7 @@ Item {
     property bool backendUp: false
     property string exportDir: ""
     // Backend connection, mirrored from KConfig by main.qml.
-    property string connectionMode: "port"
+    property string connectionMode: "socket"
     property int backendPort: 8770
     property string socketPath: ""
     property string backendEndpoint: ""
