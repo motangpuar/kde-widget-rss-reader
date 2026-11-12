@@ -127,14 +127,14 @@ Item {
             }
             PlasmaComponents3.ToolButton {
                 visible: !reader.compactMode
-                icon.name: "zoom-out"
+                icon.name: "format-font-size-less"
                 display: AbstractButton.IconOnly
                 onClicked: reader.fontScaleChanged(-10)
                 PlasmaComponents3.ToolTip { text: i18n("Smaller text") }
             }
             PlasmaComponents3.ToolButton {
                 visible: !reader.compactMode
-                icon.name: "zoom-in"
+                icon.name: "format-font-size-more"
                 display: AbstractButton.IconOnly
                 onClicked: reader.fontScaleChanged(10)
                 PlasmaComponents3.ToolTip { text: i18n("Larger text") }
@@ -157,7 +157,7 @@ Item {
                     // on the parent row, so the group labels carry icons too.
                     PlasmaComponents3.Menu {
                         title: i18n("Reading theme (%1)", reader.themeName)
-                        icon.name: "preferences-desktop-theme"
+                        icon.name: "color-management"
                         Repeater {
                             model: Typography.THEMES
                             delegate: PlasmaComponents3.MenuItem {
@@ -166,7 +166,7 @@ Item {
                                 text: i18n(modelData.label)
                                 icon.name: (reader.prefs.reader_theme || "auto")
                                            === modelData.value
-                                           ? "checkmark" : "preferences-desktop-theme"
+                                           ? "checkmark" : modelData.icon
                                 onTriggered: reader.prefsEdited(
                                                  { "reader_theme": modelData.value })
                             }
@@ -187,7 +187,9 @@ Item {
                                                    modelData,
                                                    reader.prefs.font_family || "",
                                                    reader.prefs.serif || 0)
-                                           ? "checkmark" : "preferences-desktop-font"
+                                           ? "checkmark"
+                                           : (modelData.family.length > 0 ? "font"
+                                                                          : "preferences-desktop-font")
                                 onTriggered: reader.prefsEdited(
                                                  Typography.patchForFont(modelData))
                             }
@@ -196,7 +198,7 @@ Item {
 
                     PlasmaComponents3.Menu {
                         title: i18n("Size (%1%)", reader.prefs.font_scale || 100)
-                        icon.name: "zoom-in"
+                        icon.name: "format-font-size-more"
                         Repeater {
                             model: Typography.SIZES
                             delegate: PlasmaComponents3.MenuItem {
@@ -204,7 +206,9 @@ Item {
 
                                 text: modelData + "%"
                                 icon.name: (reader.prefs.font_scale || 100) === modelData
-                                           ? "checkmark" : "zoom-in"
+                                           ? "checkmark"
+                                           : Typography.sizeIcon(
+                                                 modelData, reader.prefs.font_scale || 100)
                                 onTriggered: reader.prefsEdited({ "font_scale": modelData })
                             }
                         }
@@ -212,7 +216,7 @@ Item {
 
                     PlasmaComponents3.Menu {
                         title: i18n("Line spacing")
-                        icon.name: "view-sort-ascending"
+                        icon.name: "distribute-vertical-equal"
                         Repeater {
                             model: Typography.SPACING
                             delegate: PlasmaComponents3.MenuItem {
@@ -221,7 +225,7 @@ Item {
                                 text: i18n(modelData.label)
                                 icon.name: (reader.prefs.line_height || 160)
                                            === modelData.value
-                                           ? "checkmark" : "view-sort-ascending"
+                                           ? "checkmark" : modelData.icon
                                 onTriggered: reader.prefsEdited(
                                                  { "line_height": modelData.value })
                             }
@@ -230,7 +234,7 @@ Item {
 
                     PlasmaComponents3.Menu {
                         title: i18n("Margins")
-                        icon.name: "zoom-fit-best"
+                        icon.name: "distribute-horizontal-margin"
                         Repeater {
                             model: Typography.MARGINS
                             delegate: PlasmaComponents3.MenuItem {
@@ -239,7 +243,7 @@ Item {
                                 text: i18n(modelData.label)
                                 icon.name: (reader.prefs.reader_padding || 100)
                                            === modelData.value
-                                           ? "checkmark" : "zoom-fit-best"
+                                           ? "checkmark" : modelData.icon
                                 onTriggered: reader.prefsEdited(
                                                  { "reader_padding": modelData.value })
                             }

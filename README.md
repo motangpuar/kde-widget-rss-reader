@@ -65,8 +65,8 @@ Uninstall (keeps your feeds and read state):
 | Star | star icon on a row or in the reader toolbar |
 | Browse by folder or source | the title button in the list header opens the scope menu, left-aligned under the button: smart views, one submenu per folder (folder itself + its feeds), then ungrouped feeds. Every entry has an icon and the button shows the current one |
 | Move a feed into a folder | *Settings → Feeds* → folder icon on the row → pick a folder (or **No folder**) |
-| Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins |
-| Headline size in the list | *Settings → Reading* → zoom buttons next to **Headline size** (80–160 %) |
+| Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins — every row shows the icon that describes it |
+| Text size in the list | *Settings → Reading* → first row: **Text size in the list**, zoom buttons, 80–160 % |
 | Source of the article you are reading | the reader header shows the feed favicon next to the feed name |
 | Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |

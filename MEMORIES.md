@@ -1,6 +1,14 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.6.1: the reader's *Text* menu now shows a per-entry icon instead of repeating the group icon in
+every row: themes use `color-management` / `brightness-high` / `image-x-generic` / `brightness-low`,
+sizes use `format-font-size-less|more` depending on the direction against the current value, line
+spacing uses `distribute-vertical-*`, margins use `distribute-horizontal-*`. Icons live in
+`Typography.js` next to the values. The list text-size row moved to the top of the *Reading* card and
+is now labelled **Text size in the list**; the header chips scale with it too.
+
+## Previous Status
 v1.6.0: three follow-ups. The headline list has its own text size pref (`list_scale`, 80–160 %,
 zoom buttons in *Settings → Reading*), and its rows got more breathing room: column spacing is
 `gridUnit * 0.2` instead of `smallSpacing / 3`, cards pad by `gridUnit * 0.55`, and wrapped title /
@@ -9,7 +17,6 @@ at any scale. The wide (non-compact) side-by-side layout was deleted: with both 
 `Layout.fillWidth` the reader became a sliver at the right edge and the list stayed put, so the
 reader now replaces the list at every widget width and reuses `maxTextWidth` for line length.
 
-## Previous Status
 v1.5.1: two follow-ups from live testing. The reader header now carries the feed favicon beside
 the feed name. The two checkboxes in *Settings → Reading* draw their own indicator from Breeze
 symbolic icons (`checkbox-symbolic` + `checkmark-symbolic`) instead of the desktop-theme checkmark,
@@ -136,6 +143,11 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
    menu.
 
 ## Chronological History
+
+- 2026-11-12 v1.6.1: semantic menu icons (`icon` field on the THEMES/SPACING/MARGINS tables,
+  `Typography.sizeIcon()`), list size row promoted to the top of the Reading card, chips follow
+  `textScale`. Verified every icon name exists in Breeze at 22 px on the host; `zoom-in` /
+  `view-sort-ascending` / `zoom-fit-best` were standing in for sizes, spacing and margins.
 
 - 2026-11-12 v1.6.0: `list_scale` pref (config default + `PREF_DEFAULTS` gate), headline-size stepper
   in the Reading card, list spacing/line-height pass, wide two-pane layout removed. `dev-reload.sh`

@@ -1,31 +1,39 @@
 .pragma library
 
-// One source of truth for the reader's typography choices. Both the settings sheet and the
-// reader's own menu build their dropdowns from these tables, so the two surfaces can never
-// drift apart or offer a value the backend does not accept.
+// One source of truth for the reader's typography choices: values, labels and the icon that
+// describes each entry. The reader's Text menu is built from these tables, so a menu can never
+// offer a value the backend does not accept, and no row falls back to its group's icon.
 
+// Every entry carries the icon that describes the choice itself, so a menu row never shows the
+// icon of its group. All names are Breeze names that exist at 22 px (checked on Fedora 44).
 var THEMES = [
-    { value: "auto", label: "Follow Plasma" },
-    { value: "light", label: "Light" },
-    { value: "sepia", label: "Sepia" },
-    { value: "dark", label: "Dark" }
+    { value: "auto", label: "Follow Plasma", icon: "color-management" },
+    { value: "light", label: "Light", icon: "brightness-high" },
+    { value: "sepia", label: "Sepia", icon: "image-x-generic" },
+    { value: "dark", label: "Dark", icon: "brightness-low" }
 ]
 
 var SIZES = [80, 100, 115, 130, 145, 160]
 
 var SPACING = [
-    { value: 140, label: "Tight" },
-    { value: 160, label: "Normal" },
-    { value: 180, label: "Relaxed" },
-    { value: 200, label: "Airy" }
+    { value: 140, label: "Tight", icon: "distribute-vertical-center" },
+    { value: 160, label: "Normal", icon: "distribute-vertical-equal" },
+    { value: 180, label: "Relaxed", icon: "distribute-vertical-gaps" },
+    { value: 200, label: "Airy", icon: "distribute-vertical-margin" }
 ]
 
 var MARGINS = [
-    { value: 60, label: "Narrow" },
-    { value: 100, label: "Comfortable" },
-    { value: 140, label: "Wide" },
-    { value: 180, label: "Extra wide" }
+    { value: 60, label: "Narrow", icon: "distribute-horizontal-left" },
+    { value: 100, label: "Comfortable", icon: "distribute-horizontal-center" },
+    { value: 140, label: "Wide", icon: "distribute-horizontal-margin" },
+    { value: 180, label: "Extra wide", icon: "distribute-horizontal-equal" }
 ]
+
+// Sizes show a direction icon: entries below the current value shrink the text, entries above
+// grow it.
+function sizeIcon(value, current) {
+    return value < current ? "format-font-size-less" : "format-font-size-more"
+}
 
 // Ordered by preference; anything not installed is dropped before the list is shown.
 var FONT_CANDIDATES = [

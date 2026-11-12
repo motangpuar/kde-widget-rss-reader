@@ -289,7 +289,8 @@ Item {
                             anchors.centerIn: parent
                             text: modelData.label
                             color: parent.active ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                            font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.7)
+                            font.pixelSize:
+                                Math.round(Kirigami.Units.gridUnit * 0.7 * listRoot.textScale)
                         }
                         MouseArea {
                             anchors.fill: parent
