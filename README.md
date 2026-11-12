@@ -66,12 +66,13 @@ Uninstall (keeps your feeds and read state):
 | Browse by folder or source | the title button in the list header opens the scope menu, left-aligned under the button: smart views, one submenu per folder (folder itself + its feeds), then ungrouped feeds. Every entry has an icon and the button shows the current one |
 | Move a feed into a folder | *Settings → Feeds* → folder icon on the row → pick a folder (or **No folder**) |
 | Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins |
+| Headline size in the list | *Settings → Reading* → zoom buttons next to **Headline size** (80–160 %) |
 | Source of the article you are reading | the reader header shows the feed favicon next to the feed name |
 | Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
 | Delete a feed | *Settings → Feeds* → trash icon on the row → click again to confirm |
 | Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
-| Settings | gear icon: reading behaviour, feed management (folder picker, edit, pause, delete), bulk add, OPML, backend status |
+| Settings | gear icon: reading behaviour, headline size, feed management (folder picker, edit, pause, delete), bulk add, OPML, backend status |
 | Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
 
 Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.

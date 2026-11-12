@@ -18,6 +18,9 @@ Item {
     property bool backendUp: true
     property string statusMessage: ""
     property var iconFor: null
+    // Article rows grow with the reader-independent text size preference; the whole widget scales
+    // off one multiplier so the title, the meta line and the summary keep their relative weights.
+    property real textScale: 1.0
 
     function feedIcon(feedId) {
         return iconFor ? (iconFor(feedId) || "") : ""
@@ -341,7 +344,7 @@ Item {
                     required property var modelData
                     required property int index
                     width: itemView.width
-                    height: cardLayout.implicitHeight + Kirigami.Units.smallSpacing * 2
+                    height: cardLayout.implicitHeight + Math.round(Kirigami.Units.gridUnit * 0.55)
                     readonly property bool current: modelData.id === listRoot.currentItemId
                     readonly property bool unread: modelData.read === 0
                     readonly property string favicon: listRoot.feedIcon(modelData.feed_id)
@@ -380,7 +383,7 @@ Item {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: Math.round(Kirigami.Units.smallSpacing / 3)
+                            spacing: Math.round(Kirigami.Units.gridUnit * 0.2)
 
                             Text {
                                 Layout.fillWidth: true
@@ -388,7 +391,10 @@ Item {
                                 color: card.unread ? Kirigami.Theme.textColor
                                                    : Kirigami.Theme.disabledTextColor
                                 font.bold: card.unread
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.82)
+                                font.pixelSize:
+                                    Math.round(Kirigami.Units.gridUnit * 0.82 * listRoot.textScale)
+                                lineHeight: 1.15
+                                lineHeightMode: Text.ProportionalHeight
                                 wrapMode: Text.WordWrap
                                 maximumLineCount: 2
                                 elide: Text.ElideRight
@@ -419,7 +425,8 @@ Item {
                                         return parts.filter(function (p) { return !!p }).join(" · ")
                                     }
                                     color: Kirigami.Theme.disabledTextColor
-                                    font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.66)
+                                    font.pixelSize:
+                                        Math.round(Kirigami.Units.gridUnit * 0.66 * listRoot.textScale)
                                     elide: Text.ElideRight
                                 }
                             }
@@ -430,7 +437,10 @@ Item {
                                 text: card.modelData.summary || ""
                                 color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
                                                Kirigami.Theme.textColor.b, 0.7)
-                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                                font.pixelSize:
+                                    Math.round(Kirigami.Units.gridUnit * 0.72 * listRoot.textScale)
+                                lineHeight: 1.2
+                                lineHeightMode: Text.ProportionalHeight
                                 wrapMode: Text.WordWrap
                                 maximumLineCount: 2
                                 elide: Text.ElideRight

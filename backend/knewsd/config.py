@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 APP = "knews-curator"
-VERSION = "1.4.0"
+VERSION = "1.6.0"
 DEFAULT_PORT = 8770
 USER_AGENT = (
     f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -20,6 +20,7 @@ PREF_DEFAULTS: dict[str, object] = {
     "font_scale": 100,           # percent, 80..170
     "line_height": 160,          # percent of font size
     "reader_padding": 100,       # percent of the reader side margin, 60..160
+    "list_scale": 100,           # percent, headline list text size, 80..160
     "auto_mark_read": 1,
     "refresh_minutes": 30,       # 0 disables background refresh
     "open_external": 0,          # 1 -> single click opens system browser

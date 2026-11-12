@@ -10,8 +10,11 @@ fi
 
 kpackagetool6 --type Plasma/Applet --upgrade "$PROJECT_DIR/plasmoid/$PLASMOID_ID" >/dev/null 2>&1 \
     || kpackagetool6 --type Plasma/Applet --install "$PROJECT_DIR/plasmoid/$PLASMOID_ID" >/dev/null
-PLASMA_UNIT=$(systemctl --user list-units --type=service --no-legend 'app-plasmashell@*.service' \
-    | awk '{print $1}' | head -1)
+# Plasma 6.7 runs the shell as plasma-plasmashell.service on Fedora; the per-session
+# app-plasmashell@<hash>.service template is still what Arch and older builds use.
+PLASMA_UNIT=$(systemctl --user list-units --type=service --no-legend --all \
+    'plasma-plasmashell.service' 'app-plasmashell@*.service' 2>/dev/null \
+    | awk '$3 == "active" {print $1}' | head -1)
 [ -n "$PLASMA_UNIT" ] || { echo "plasmashell unit not found" >&2; exit 1; }
 START=$(date "+%Y-%m-%d %H:%M:%S")
 systemctl --user try-restart "$PLASMA_UNIT"

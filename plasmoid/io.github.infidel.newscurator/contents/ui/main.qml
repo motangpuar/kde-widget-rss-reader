@@ -544,13 +544,16 @@ PlasmoidItem {
             anchors.margins: 1
             spacing: 0
 
+            // One pane at a time: the reader replaces the list at every widget size. A side-by-side
+            // split broke down as soon as the widget was resized (both panes fought over the width
+            // and the reader ended up a sliver at the edge), and the reader caps its own text width.
             ArticleList {
                 id: list
                 Layout.fillHeight: true
-                Layout.fillWidth: !root.readerOpen || !root.compactUi
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+                Layout.fillWidth: !root.readerOpen
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 14
-                visible: !root.compactUi || !root.readerOpen
+                visible: !root.readerOpen
+                textScale: (root.prefs.list_scale || 100) / 100
                 items: root.items
                 total: root.totalItems
                 currentItemId: root.currentItemId
@@ -584,14 +587,6 @@ PlasmoidItem {
                 onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
                 onLoadMoreRequested: root.loadMore()
-            }
-
-            Rectangle {
-                Layout.fillHeight: true
-                Layout.preferredWidth: 1
-                color: Kirigami.Theme.textColor
-                opacity: 0.12
-                visible: root.readerOpen && !root.compactUi
             }
 
             ReaderView {

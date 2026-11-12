@@ -425,6 +425,48 @@ Item {
                             checked: sheet.pref("open_external", 0) === 1
                             onToggled: sheet.prefChanged("open_external", checked ? 1 : 0)
                         }
+
+                        // The list has its own size so a long headline list stays readable without
+                        // changing the typography of the reader itself.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: i18n("Headline size")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                elide: Text.ElideRight
+                            }
+                            PlasmaComponents3.ToolButton {
+                                icon.name: "zoom-out"
+                                display: AbstractButton.IconOnly
+                                enabled: sheet.pref("list_scale", 100) > 80
+                                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                                implicitHeight: Kirigami.Units.iconSizes.smallMedium
+                                onClicked: sheet.prefChanged("list_scale",
+                                    Math.max(80, sheet.pref("list_scale", 100) - 10))
+                                PlasmaComponents3.ToolTip { text: i18n("Smaller headlines") }
+                            }
+                            Text {
+                                text: i18n("%1%", sheet.pref("list_scale", 100))
+                                color: Kirigami.Theme.textColor
+                                horizontalAlignment: Text.AlignRight
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.8)
+                                Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 1.8)
+                            }
+                            PlasmaComponents3.ToolButton {
+                                icon.name: "zoom-in"
+                                display: AbstractButton.IconOnly
+                                enabled: sheet.pref("list_scale", 100) < 160
+                                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                                implicitHeight: Kirigami.Units.iconSizes.smallMedium
+                                onClicked: sheet.prefChanged("list_scale",
+                                    Math.min(160, sheet.pref("list_scale", 100) + 10))
+                                PlasmaComponents3.ToolTip { text: i18n("Bigger headlines") }
+                            }
+                        }
                     }
 
                     // -------------------------------------------------------- feeds
