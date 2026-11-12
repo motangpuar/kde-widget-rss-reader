@@ -1,7 +1,7 @@
 name: Release
 
 # Cut a release by pushing a version tag:
-#   git tag -a v1.7.0 -m "News Curator 1.7.0" && git push origin main --follow-tags
+#   git tag -a v1.8.0 -m "News Curator 1.8.0" && git push origin main --follow-tags
 # The workflow refuses to publish when the tag and metadata.json disagree, so the tagged commit
 # is always self-consistent. Products:
 #   io.github.infidel.newscurator-<version>.plasmoid  -> upload as-is to store.kde.org
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to publish (e.g. v1.7.0)
+        description: Existing tag to publish (e.g. v1.8.0)
         required: true
 
 permissions:

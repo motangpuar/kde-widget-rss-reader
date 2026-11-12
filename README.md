@@ -62,8 +62,8 @@ systemd-managed daemon holding the port alone.
 
 ```bash
 # widget + backend + systemd unit   (see Releases for the current version)
-curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.7.0.tar.gz
-tar -xzf news-curator-1.7.0.tar.gz && cd news-curator-1.7.0 && ./install.sh
+curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.8.0.tar.gz
+tar -xzf news-curator-1.8.0.tar.gz && cd news-curator-1.8.0 && ./install.sh
 ```
 
 Use this when you want the daemon run by `systemd --user` (it then also serves the API while no
@@ -315,7 +315,7 @@ disagrees, and writes:
 ### Releasing
 
 ```bash
-git tag -a v1.7.0 -m "News Curator 1.7.0"
+git tag -a v1.8.0 -m "News Curator 1.8.0"
 git push origin main --follow-tags
 ```
 

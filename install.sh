@@ -37,6 +37,15 @@ install -m 644 "$PROJECT_DIR/systemd/knewsd.service" "$UNIT_DIR/knewsd.service"
 sed -i "s/--port [0-9]*/--port $PORT/" "$UNIT_DIR/knewsd.service"
 log "unit: $UNIT_DIR/knewsd.service"
 
+# A store install has no unit: the widget starts the daemon itself and keeps it in
+# ~/.cache/knews-curator/knewsd.pid. Hand the port back to systemd, otherwise the new
+# unit cannot bind and the old version keeps answering /api/health.
+BOOTSTRAP="$PLASMOID_SRC/contents/backend/bootstrap.sh"
+if [ -f "$HOME/.cache/knews-curator/knewsd.pid" ] && [ -f "$BOOTSTRAP" ]; then
+    sh "$BOOTSTRAP" --stop --port "$PORT" >/dev/null 2>&1 || true
+    log "stopped the widget-managed daemon"
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable knewsd.service
 systemctl --user restart knewsd.service

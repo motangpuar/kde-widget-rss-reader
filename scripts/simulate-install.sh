@@ -108,7 +108,7 @@ else
     RUN() { bash -lc "$1"; }
 fi
 SERVICE=$(RUN "systemctl --user is-active knewsd.service")
-HEALTH=$(RUN "python3 -c \"import json,urllib.request;print(json.load(urllib.request.urlopen('http://127.0.0.1:8770/api/health')))\"")
+HEALTH=$(RUN "curl -fsS http://127.0.0.1:8770/api/health")
 INSTALLED_QML=$(RUN "md5sum \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/ui/main.qml" \
     | cut -d' ' -f1)
 EXPECTED_QML=$(md5sum "$DL/news-curator-$VERSION/plasmoid/$PLASMOID_ID/contents/ui/main.qml" \
@@ -118,7 +118,7 @@ printf '  installed qml: %s\n  expected  qml: %s\n' "$INSTALLED_QML" "$EXPECTED_
 [ "$SERVICE" = active ] || { echo "error: knewsd is not active" >&2; exit 1; }
 [ "$INSTALLED_QML" = "$EXPECTED_QML" ] \
     || { echo "error: installed applet differs from the release contents" >&2; exit 1; }
-grep -q "'version': '$VERSION'" <<<"$HEALTH" \
+grep -q "\"version\": \"$VERSION\"" <<<"$HEALTH" \
     || { echo "error: backend reports a different version" >&2; exit 1; }
 
 step "result"

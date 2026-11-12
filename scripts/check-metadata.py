@@ -4,7 +4,10 @@
 Used by CI, by scripts/ci-local.sh and by the release workflow, so a packaging mistake fails
 locally instead of on a GitHub runner. Stdlib only.
 
-    python3 scripts/check-metadata.py [--expect-tag v1.7.0] [--print-version]
+    python3 scripts/check-metadata.py [--expect-tag v1.8.0] [--require-backend]
+
+knewsd.pyz is a build product (gitignored), so it only exists after ./build.sh: it is checked
+when present, and required only with --require-backend (post-build callers).
 """
 
 import json
@@ -27,6 +30,7 @@ def fail(message):
 def main():
     expect_tag = None
     print_version = False
+    require_backend = False
     args = sys.argv[1:]
     while args:
         if args[0] == "--print-version":
@@ -35,8 +39,12 @@ def main():
         elif args[0] == "--expect-tag" and len(args) >= 2:
             expect_tag = args[1]
             args = args[2:]
+        elif args[0] == "--require-backend":
+            require_backend = True
+            args = args[1:]
         else:
-            print("usage: check-metadata.py [--expect-tag vX.Y.Z] [--print-version]",
+            print("usage: check-metadata.py [--expect-tag vX.Y.Z] [--require-backend] "
+                  "[--print-version]",
                   file=sys.stderr)
             return 2
 
@@ -92,9 +100,14 @@ def main():
         fail("contents/config/main.xml is missing")
 
     # A store install has no installer script, so the daemon has to travel inside the package.
-    for name in ("bootstrap.sh", "knewsd.pyz"):
-        if not (PKG / "contents" / "backend" / name).is_file():
-            fail(f"missing bundled backend contents/backend/{name} (run ./build.sh)")
+    if not (PKG / "contents" / "backend" / "bootstrap.sh").is_file():
+        fail("missing contents/backend/bootstrap.sh")
+    zipapp = PKG / "contents" / "backend" / "knewsd.pyz"
+    if not zipapp.is_file():
+        if require_backend:
+            fail("missing bundled backend contents/backend/knewsd.pyz (run ./build.sh)")
+    elif zipapp.stat().st_size < 10000:
+        fail(f"contents/backend/knewsd.pyz looks truncated ({zipapp.stat().st_size} bytes)")
 
     ui_files = sorted((PKG / "contents" / "ui").glob("*"))
     if not ui_files:

@@ -159,6 +159,18 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 release 1.8.0: self-contained package merged. Store `.plasmoid` (15 files, 60 KB)
+  carries `contents/backend/knewsd.pyz` + `bootstrap.sh`; widget starts its own daemon through
+  `plasma5support`, autostart entry keeps it alive across logins, `--stop` undoes it. Verified live
+  with the systemd unit stopped+disabled (widget daemon served the real 30-feed DB) and again by
+  installing the built package as a store user would. `install.sh` now hands the port back from a
+  widget-managed daemon (pidfile) so its unit can bind the new version; `simulate-install.sh` probes
+  health with `curl` instead of nested-quoted python and asserts the exact version string.
+  CI caught what the local gate could not: `check-metadata.py` demanded `knewsd.pyz`, which is a
+  gitignored build product, so both workflows failed in a fresh checkout. The zipapp is now checked
+  only when present, `--require-backend` guards the post-build call, and ci-local runs it right
+  after `./build.sh`; tag v1.8.0 was moved to the amended commit because nothing had been published.
+
 - 2026-11-12 branch `feature/self-contained-package`: store install without any script. `build.sh`
   now emits a deterministic zipapp (`knewsd.pyz`) into the package, `contents/backend/bootstrap.sh`
   self-installs it (`~/.local/share/knews-curator/app/`, XDG autostart, health-first so it is

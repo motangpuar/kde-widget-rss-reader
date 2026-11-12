@@ -66,6 +66,9 @@ fi
 step "build"
 ./build.sh
 
+step "bundled backend"
+python3 scripts/check-metadata.py --require-backend
+
 step "package contents"
 bash scripts/verify-package.sh
 
