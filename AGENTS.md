@@ -107,6 +107,18 @@ build.sh  install.sh  uninstall.sh  dev-reload.sh
 LICENSE
 ```
 
+## Startup repaint contract (QML)
+- **One request per view per refresh.** `loadItems` collapses duplicate triggers (initial load,
+  endpoint report, retry poll, 60 s sync) with `inflightQuery`; the newest request owns
+  `loadingItems`/`totalItems` via `itemRequestId`, so a stale answer for another view is dropped.
+- **Never blank the pane for the same view.** Rows are only cleared when `itemQuery()` differs
+  from `shownQuery` (real navigation); a reload swaps rows on arrival **without a model swap**.
+  Clearing before the payload lands is what made the widget blink at every startup.
+- **`/api/state` is single-flight** (`stateLoading`), stops `backendRetry` on success, and the
+  retry poll exists only as a fallback for a slow backend.
+- **`onBackendPortChanged` reloads only when the widget is not `backendUp`**: the endpoint line
+  arrives right after the first successful sync, so reloading there repainted identical rows.
+
 ## Rules
 - Backend must stay stdlib-only (host is an immutable OS; no pip installs).
 - QML: Plasma 6 imports only (`org.kde.plasma.components` 3.0, `org.kde.kirigami`).

@@ -43,6 +43,13 @@ PlasmoidItem {
     property var items: []
     property int totalItems: 0
     property bool loadingItems: false
+    // The query the rows on screen belong to, and the one a request is out for. A list refresh
+    // for the same view must not blank the pane (that is the startup blink); only a real
+    // navigation to a different view clears it.
+    property string shownQuery: ""
+    property string inflightQuery: ""
+    property int itemRequestId: 0
+    property bool stateLoading: false
     property string view: "unread"
     property int selectedFeedId: 0
     property string selectedFolder: ""
@@ -126,11 +133,15 @@ PlasmoidItem {
                 root.activePort = port
         }
         onFinished: (state) => {
+            // bootstrap.sh prints its endpoint line only after /api/health answered, so the first
+            // sync can run now; the retry timer stays as a fallback and stops on the first success.
             if (state === "running") {
                 statusMessage = i18n("Starting the feed backend…")
                 backendRetry.restart()
+                root.loadState()
             } else if (state === "already") {
                 backendRetry.restart()
+                root.loadState()
             } else if (state === "no-python") {
                 statusMessage = i18n("Python 3 is required for the feed backend. "
                                      + "Install python3, then reopen this widget.")
@@ -161,7 +172,10 @@ PlasmoidItem {
 
     onBackendPortChanged: {
         Api.setPort(backendPort)
-        loadState()
+        // The endpoint line usually lands right after a successful sync; re-reading the state then
+        // only repaints the same rows. Reload only when the previous port was wrong/offline.
+        if (!root.backendUp)
+            root.loadState()
     }
 
     Timer {
@@ -201,10 +215,15 @@ PlasmoidItem {
     }
 
     function loadState(reloadItems) {
+        if (stateLoading)
+            return
+        stateLoading = true
         Api.request("GET", "/api/state", null, function (status, data) {
+            stateLoading = false
             if (status === 200 && data) {
                 backendUp = true
                 statusMessage = ""
+                backendRetry.stop()
                 feeds = data.feeds || []
                 folders = data.folders || []
                 counts = data.counts || root.counts
@@ -219,34 +238,58 @@ PlasmoidItem {
         })
     }
 
+    function itemQuery() {
+        var query = "view=" + Api.encode(view)
+        if (selectedFeedId > 0)
+            query += "&feed=" + selectedFeedId
+        else if (selectedFolder)
+            query += "&folder=" + Api.encode(selectedFolder)
+        if (searchText)
+            query += "&q=" + Api.encode(searchText)
+        return query
+    }
+
     function loadItems(reset) {
+        var query = itemQuery()
         if (reset !== false) {
-            loadingItems = true
-            items = []
-            totalItems = 0
-        } else {
-            if (loadingItems || items.length >= totalItems)
+            // Duplicate triggers are the normal case at startup (initial load, endpoint report,
+            // retry poll, 60 s sync); collapse them into one request.
+            if (loadingItems && inflightQuery === query)
                 return
-            loadingItems = true
+            if (query !== shownQuery) {
+                // Real navigation: the old rows belong to another feed or search term.
+                items = []
+                totalItems = 0
+            }
+        } else {
+            if (loadingItems || items.length >= totalItems || query !== shownQuery)
+                return
         }
-        var path = "/api/items?limit=60&view=" + Api.encode(view)
+        loadingItems = true
+        inflightQuery = query
+        // Switching views while a request is out must not let the older answer land: only the
+        // newest request owns loadingItems, totalItems and the rows.
+        var requestId = ++root.itemRequestId
+        var path = "/api/items?limit=60&" + query
         if (reset === false)
             path += "&offset=" + items.length
-        if (selectedFeedId > 0)
-            path += "&feed=" + selectedFeedId
-        else if (selectedFolder)
-            path += "&folder=" + Api.encode(selectedFolder)
-        if (searchText)
-            path += "&q=" + Api.encode(searchText)
         Api.request("GET", path, null, function (status, data) {
+            if (requestId !== root.itemRequestId)
+                return
             loadingItems = false
+            inflightQuery = ""
             if (status !== 200 || !data) {
                 fail(status)
                 return
             }
             backendUp = true
             totalItems = data.total || 0
-            items = reset === false ? items.concat(data.items || []) : (data.items || [])
+            if (reset === false && query === shownQuery)
+                items = items.concat(data.items || [])
+            else {
+                items = data.items || []
+                shownQuery = query
+            }
         })
     }
 

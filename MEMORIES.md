@@ -168,6 +168,13 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 startup blink fixed (`main.qml`): the pane blanked 2-3x on load because
+  `loadItems(true)` cleared `items` before the payload and four separate triggers (initial load,
+  endpoint report, retry poll, pollRefresh) each fired a full reload. Now: same-view reloads swap
+  rows without clearing, `itemQuery()`/`shownQuery` distinguish navigation from refresh,
+  `inflightQuery` collapses duplicate requests, `itemRequestId` drops stale answers after a view
+  switch, `loadState` is single-flight, the retry poll stops on first success, and
+  `onBackendPortChanged` reloads only while not `backendUp`. `qmllint` clean (import warnings only).
 - 2026-11-12 no init system in the default path (same branch): `install.sh` installed and enabled
   a systemd unit even for a store-style install, so a systemd-less desktop had a broken documented
   path and a unit that outlived GUI removal. Default is now applet + icons only and the widget
