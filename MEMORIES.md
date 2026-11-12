@@ -1,6 +1,21 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.7.0: distribution restructure + local CI gate. `build.sh` emits `dist/io.github.infidel.newscurator-<v>.plasmoid`
+(deterministic zip, `metadata.json` at archive root, verified installable with
+`kpackagetool6 --install`), `dist/news-curator-<v>.tar.gz` (plasmoid + backend + unit + icons +
+installer; installed end-to-end from the extracted tarball, health check reported 1.7.0) and
+`SHA256SUMS`. Added `LICENSE` (MIT), `contents/icons/` copies of the theme icons, and two
+workflows: `ci.yml` (tests on 3.11/3.13, metadata validation, build, package-layout assertions,
+checksum verify, artifact upload) and `release.yml` (tag `v*` → test, tag/version crosscheck,
+build, `gh release create`). Version is now 1.7.0 in metadata.json and backend config.py. Follow-up: CI logic moved into
+`scripts/` (`check-metadata.py`, `verify-package.sh`, `ci-local.sh`) after an inline heredoc in the
+workflow resolved `X-Plasma-MainScript` against the package root instead of `contents/` and failed
+on the runner; the zip then had to be reordered so `metadata.json` is the first entry, and the
+tarball is now built with `--sort=name --owner=0 --group=0 --mtime=@0` so both artifacts are
+reproducible (the gate asserts it).
+
+## Previous Status
 v1.6.1: the reader's *Text* menu now shows a per-entry icon instead of repeating the group icon in
 every row: themes use `color-management` / `brightness-high` / `image-x-generic` / `brightness-low`,
 sizes use `format-font-size-less|more` depending on the direction against the current value, line
@@ -143,6 +158,18 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
    menu.
 
 ## Chronological History
+
+- 2026-11-12 v1.7.0 (cont.): CI failure was `X-Plasma-MainScript points at a missing file:
+  ui/main.qml` — inline checks ran too far from the scripts they validated. Now every CI check is a
+  script that `./scripts/ci-local.sh` also runs (plus reproducibility, plus a heredoc guard on the
+  workflow files). Local gate caught two more real bugs immediately: zip entry order and tarball
+  non-determinism.
+
+- 2026-11-12 v1.7.0: packaging. KPackage archives are zips with `metadata.json` at the root and
+  `kpackagetool6 --install file.plasmoid` unpacks them, so the store artifact and the CI check use
+  the same shape. Version lives in two files (metadata + backend) and `build.sh` refuses to build
+  when they diverge — that is the drift that bit v1.6.0/v1.6.1 (metadata said 1.6.0 while the
+  shipped code was 1.6.1).
 
 - 2026-11-12 v1.6.1: semantic menu icons (`icon` field on the THEMES/SPACING/MARGINS tables,
   `Typography.sizeIcon()`), list size row promoted to the top of the Reading card, chips follow

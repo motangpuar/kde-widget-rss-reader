@@ -35,8 +35,29 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
 
 ## Install
 
+### From a release (recommended)
+
+```bash
+# full install: widget + backend + systemd unit   (see Releases for the current version)
+curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.7.0.tar.gz
+tar -xzf news-curator-1.7.0.tar.gz && cd news-curator-1.7.0 && ./install.sh
+```
+
+The widget alone can also be installed without the daemon (it will then report *Backend
+offline*, which is expected until the backend exists):
+
+```bash
+kpackagetool6 --type Plasma/Applet --install io.github.infidel.newscurator-1.7.0.plasmoid
+```
+
+That is exactly the file published to store.kde.org; the store build has no `install.sh` and
+therefore no backend, so the tarball stays the supported path.
+
+### From a git checkout
+
 ```bash
 ./install.sh          # backend + systemd unit + applet + icons
+./build.sh            # dist/: .plasmoid for the store, tarball, SHA256SUMS
 ```
 
 Then right-click the desktop or panel → **Add Widgets** → **News Curator**.
@@ -242,9 +263,51 @@ POST /api/opml                {"opml": "<opml>...</opml>"}
 POST /api/extract             {"id": 1} — force re-extraction
 ```
 
+## Distribution
+
+```
+plasmoid/io.github.infidel.newscurator/   KPackage root: metadata.json + contents/
+backend/knewsd/                           stdlib-only daemon
+systemd/knewsd.service                    user unit (port templated by install.sh)
+icons/                                    theme icons, installed to hicolor
+build.sh                                  produces dist/ artifacts
+scripts/ci-local.sh                       runs the whole CI gate locally
+scripts/check-metadata.py                 metadata/version validation (CI + local + release)
+scripts/verify-package.sh                 asserts the built artifacts are shippable
+.github/workflows/ci.yml                  calls the same scripts on every push
+.github/workflows/release.yml             publishes a GitHub release for every v* tag
+```
+
+All checks live in `scripts/`, and the workflows only call them — so `./scripts/ci-local.sh`
+reproduces CI byte for byte (same metadata validation, same packaging assertions, same
+reproducibility check) before anything is pushed. Workflow files are additionally linted for
+inline shell heredocs, which are the one thing that cannot be tested locally.
+
+`build.sh` reads the version from `metadata.json`, refuses to run when `backend/knewsd/config.py`
+disagrees, and writes:
+
+| Artifact | Contents |
+|---|---|
+| `io.github.infidel.newscurator-<v>.plasmoid` | zip whose root is `metadata.json` + `contents/` — KPackage and store.kde.org accept it as-is |
+| `news-curator-<v>.tar.gz` | `news-curator-<v>/` with plasmoid, backend, unit, icons, installer |
+| `SHA256SUMS` | checksums of both |
+
+### Releasing
+
+```bash
+git tag -a v1.7.0 -m "News Curator 1.7.0"
+git push origin main --follow-tags
+```
+
+The `Release` workflow runs the tests, fails when the tag and `metadata.json` version disagree,
+builds the artifacts, and attaches them to a GitHub release. Upload the `.plasmoid` from that
+release to store.kde.org (Plasma 6 → *Plasma Add-Ons* → *Applets*); the tarball is what users
+download to get a working backend.
+
 ## Development
 
 ```bash
+./scripts/ci-local.sh                                          # full local CI gate
 python3 -m unittest discover -s backend/tests -t backend -v   # 45 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
@@ -271,6 +334,7 @@ Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit e
 | `~/.cache/knews-curator/images` | image cache |
 | `~/.config/systemd/user/knewsd.service` | user unit |
 | `~/.local/share/plasma/plasmoids/io.github.infidel.newscurator` | installed applet |
+| `dist/` | local build output (`build.sh`), not tracked |
 
 ## Notes and limits
 
@@ -288,4 +352,4 @@ Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit e
 
 ## License
 
-MIT.
+MIT — see `LICENSE`.

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The checks themselves live in scripts/ so the same commands run locally:
+#   ./scripts/ci-local.sh
+# Workflow steps stay one-liners on purpose; inline shell heredocs here cannot be tested before
+# a push, and one of them shipped a broken path check to CI once.
+jobs:
+  test:
+    name: backend tests (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run unit tests
+        run: python -m unittest discover -s backend/tests -t . -v
+
+  package:
+    name: packaging gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate metadata
+        run: python3 scripts/check-metadata.py
+      - name: Shell syntax and workflow hygiene
+        run: bash -n build.sh install.sh uninstall.sh dev-reload.sh scripts/*.sh
+      - name: Build and verify artifacts
+        run: ./scripts/ci-local.sh --skip-tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news-curator-packages
+          path: dist/*
+          if-no-files-found: error

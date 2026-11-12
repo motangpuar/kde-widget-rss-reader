@@ -10,3 +10,5 @@ dist/
 *.sqlite3
 *.log
 .knews/
+*.qmlc
+*.pyc

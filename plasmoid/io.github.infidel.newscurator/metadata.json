@@ -3,16 +3,17 @@
   "KPlugin": {
     "Authors": [
       {
-        "Name": "infidel"
+        "Name": "infidel",
+        "Email": "infidel@users.noreply.github.com"
       }
     ],
     "Category": "Online Services",
-    "Description": "Feed reader and news curator with built-in reading view: RSS/Atom/JSON feeds, folders, unread counts, stars, offline article extraction.",
+    "Description": "Feed reader and news curator with a built-in reading view: RSS/Atom/JSON feeds, folders, unread counts, stars, offline article extraction and instapaper-style reading. Requires the local knewsd backend.",
     "Icon": "newscurator",
     "Id": "io.github.infidel.newscurator",
     "License": "MIT",
     "Name": "News Curator",
-    "Version": "1.6.0"
+    "Version": "1.7.0"
   },
   "X-Plasma-API-Minimum-Version": "6.0",
   "X-Plasma-MainScript": "ui/main.qml"
