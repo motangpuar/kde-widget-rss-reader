@@ -99,7 +99,7 @@ fi
 
 step "full install"
 cd "news-curator-$VERSION"
-./install.sh | sed 's/^/  /'
+./install.sh 2>&1 | tee "$WORK/install.log" | sed 's/^/  /'
 
 step "verify the installed machine"
 if command -v distrobox-host-exec >/dev/null 2>&1 && ! command -v kpackagetool6 >/dev/null 2>&1; then
@@ -107,19 +107,61 @@ if command -v distrobox-host-exec >/dev/null 2>&1 && ! command -v kpackagetool6 
 else
     RUN() { bash -lc "$1"; }
 fi
-SERVICE=$(RUN "systemctl --user is-active knewsd.service")
+# The default install must leave no persistent service behind: no unit, no autostart entry, no
+# daemon. The widget is the supervisor, so the daemon only appears when a client asks for it.
+UNIT_STATE=$(RUN "systemctl --user is-enabled knewsd.service 2>&1 || true")
+AUTOSTART=$(RUN "ls \$HOME/.config/autostart/knewsd.desktop 2>&1 || true")
+RUNNING=$(RUN "curl -fsS -m 2 http://127.0.0.1:8770/api/health 2>/dev/null || echo none")
+printf '  unit:      %s\n  autostart: %s\n  daemon:    %s\n' \
+    "$UNIT_STATE" "$AUTOSTART" "$RUNNING"
+case "$UNIT_STATE" in
+    *not-found*|*disabled*|*No\ such\ file*) ;;
+    *) echo "error: the default install must not install a unit ($UNIT_STATE)" >&2; exit 1 ;;
+esac
+grep -q "No such file" <<<"$AUTOSTART" \
+    || { echo "error: default install wrote an autostart entry ($AUTOSTART)" >&2; exit 1; }
+# A daemon may already be there because a live widget started it — that is the correct state. What
+# must not happen is an OS-owned one (idle_exit 0 comes from the systemd unit).
+case "$RUNNING" in
+    none) printf '  daemon:    none (no client running)\n' ;;
+    *'"idle_exit": 900'*)
+        printf '  daemon:    widget-supervised (a live widget asked for it)\n' ;;
+    *) echo "error: unexpected daemon after a default install: $RUNNING" >&2; exit 1 ;;
+esac
+grep -q "none installed" "$WORK/install.log" \
+    || { echo "error: the default install did not report a widget-supervised backend" >&2; exit 1; }
+grep -q "systemctl --user" "$WORK/install.log" \
+    && { echo "error: the default install touched systemd" >&2; exit 1; }
+
+# Now do what the widget does: run bootstrap.sh, then stop it the way the widget would.
+BOOT=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --port 8770; true")
 HEALTH=$(RUN "curl -fsS http://127.0.0.1:8770/api/health")
+STOPPED=$(RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --stop; true")
+GONE=$(RUN "curl -fsS -m 2 http://127.0.0.1:8770/api/health 2>/dev/null || echo none")
 INSTALLED_QML=$(RUN "md5sum \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/ui/main.qml" \
     | cut -d' ' -f1)
 EXPECTED_QML=$(md5sum "$DL/news-curator-$VERSION/plasmoid/$PLASMOID_ID/contents/ui/main.qml" \
     | cut -d' ' -f1)
-printf '  service: %s\n  health:  %s\n' "$SERVICE" "$HEALTH"
+printf '  bootstrap: %s\n  health:    %s\n' \
+    "$(grep -o 'BOOTSTRAP_[A-Z]* [0-9]*' <<<"$BOOT" | tail -1)" "$HEALTH"
+printf '  stop:      %s\n  after:     %s\n' \
+    "$(grep -o 'BOOTSTRAP_[A-Z]*' <<<"$STOPPED" | tail -1)" "$GONE"
 printf '  installed qml: %s\n  expected  qml: %s\n' "$INSTALLED_QML" "$EXPECTED_QML"
-[ "$SERVICE" = active ] || { echo "error: knewsd is not active" >&2; exit 1; }
-[ "$INSTALLED_QML" = "$EXPECTED_QML" ] \
-    || { echo "error: installed applet differs from the release contents" >&2; exit 1; }
+grep -qE "BOOTSTRAP_(STARTED|ALREADY)" <<<"$BOOT" \
+    || { echo "error: the widget bootstrap did not provide a backend" >&2; exit 1; }
 grep -q "\"version\": \"$VERSION\"" <<<"$HEALTH" \
     || { echo "error: backend reports a different version" >&2; exit 1; }
+grep -q "BOOTSTRAP_STOPPED" <<<"$STOPPED" \
+    || { echo "error: the widget bootstrap did not stop the backend" >&2; exit 1; }
+[ "$GONE" = "none" ] || { echo "error: the backend survived --stop ($GONE)" >&2; exit 1; }
+[ "$INSTALLED_QML" = "$EXPECTED_QML" ] \
+    || { echo "error: installed applet differs from the release contents" >&2; exit 1; }
+
+# Hand the backend back to the widget: the stop above is the widget's own exit path, and a live
+# desktop should not be left offline by a packaging test.
+RUN "sh \$HOME/.local/share/plasma/plasmoids/$PLASMOID_ID/contents/backend/bootstrap.sh --port 8770 >/dev/null 2>&1 || true"
+RESTORED=$(RUN "curl -fsS -m 3 http://127.0.0.1:8770/api/health 2>/dev/null || echo none")
+printf '  restored:  %s\n' "$RESTORED"
 
 step "result"
-printf 'GitHub-style install of %s verified end to end\n' "$TAG"
+printf 'GitHub-style install of %s verified end to end (widget-supervised, no init system)\n' "$TAG"

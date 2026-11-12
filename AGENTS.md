@@ -24,8 +24,9 @@ qmllint plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 # run backend standalone
 python3 -m knewsd --port 8770        # PYTHONPATH=backend
 
-# install widget to host
-./install.sh            # kpackagetool6 -i (host) + systemd --user unit
+# install widget to host (no init system: the widget supervises the backend)
+./install.sh              # kpackagetool6 -i (host) + icons only
+./install.sh --systemd    # opt-in: also install/enable the user unit
 ./uninstall.sh
 
 # release artifacts (dist/: .plasmoid, tarball, SHA256SUMS)
@@ -67,11 +68,13 @@ supervisor per deployment:
 | Deployment | Supervisor | Lifetime |
 |---|---|---|
 | store package | the widget (`BackendLauncher.qml`) | spawned on widget load, stopped in `Component.onDestruction`, reaped by `KNEWS_IDLE_EXIT` (900 s default) |
-| release tarball | `systemd --user` (`knewsd.service`) | unit owns it; `Environment=KNEWS_IDLE_EXIT=0` disables the reaper |
+| `install.sh --systemd` (opt-in) | `systemd --user` (`knewsd.service`) | unit owns it; `Environment=KNEWS_IDLE_EXIT=0` disables the reaper |
 
-- **No autostart entry.** 1.8.x wrote `~/.config/autostart/knewsd.desktop`; that scoped the
-  lifetime to the login session instead of to the client and left a daemon behind on uninstall.
-  `bootstrap.sh` and `uninstall.sh` delete it on sight. Never reintroduce it.
+- **No autostart entry, no init system in the default path.** 1.8.x wrote
+  `~/.config/autostart/knewsd.desktop`; that scoped the lifetime to the login session instead of
+  to the client and left a daemon behind on uninstall. `bootstrap.sh` and `uninstall.sh` delete it
+  on sight. Never reintroduce it. `install.sh` without `--systemd` installs **only** the applet and
+  icons: no unit, no autostart, no process. The widget works on systems without systemd.
 - **Orphan prevention is server-side**: the invariant "no process without a client" is enforced
   by the idle reaper inside `knewsd`, so a `plasmashell` crash or a `kpackagetool6 --remove`
   cannot leak a listener. Client cleanup is a convenience, not the guarantee.

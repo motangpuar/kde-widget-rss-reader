@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
-# Install the News Curator backend, systemd user unit, icon, and Plasma applet.
+# Install the Plasma applet — and nothing else.
+#
+# The widget is the supervisor of its backend (the LSP model): on load it starts the daemon it
+# ships, on destruction it stops it, and the daemon reaps itself after 15 idle minutes. That is
+# why no init system is required here: no unit, no autostart entry, no service manager.
+#
+#   ./install.sh              applet + icons only; the widget runs its own backend
+#   ./install.sh --systemd    additionally install, enable and start the optional user unit
+#                             (headless refresh with no widget on screen; opt-in, not required)
+#
+#   --port N                  port for the systemd unit (default 8770, or $KNEWS_PORT)
 set -euo pipefail
 
 PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -9,6 +19,16 @@ APP_DIR="$HOME/.local/share/knews-curator/app"
 UNIT_DIR="$HOME/.config/systemd/user"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 PORT=${KNEWS_PORT:-8770}
+SYSTEMD=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --systemd) SYSTEMD=1 ;;
+        --port) shift; PORT=${1:?--port needs a value} ;;
+        *) printf 'usage: %s [--systemd] [--port N]\n' "$0" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 # Plasma tooling lives in the host session, not in a distrobox container.
 if ! command -v kpackagetool6 >/dev/null 2>&1 && command -v distrobox-host-exec >/dev/null 2>&1; then
@@ -25,36 +45,48 @@ python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
     || die "python3 >= 3.11 required (found $(python3 -V 2>&1))"
 log "python: $(python3 -V 2>&1) at $(command -v python3)"
 
-printf 'Backend\n'
-mkdir -p "$APP_DIR" "$HOME/.cache/knews-curator/images"
-rm -rf "$APP_DIR/knewsd"
-cp -r "$PROJECT_DIR/backend/knewsd" "$APP_DIR/knewsd"
-find "$APP_DIR/knewsd" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-log "code: $APP_DIR/knewsd"
+if [ "$SYSTEMD" = "1" ]; then
+    command -v systemctl >/dev/null 2>&1 || die "--systemd needs systemd (or omit the flag: the widget supervises the backend itself)"
+    printf 'Backend (systemd mode)\n'
+    mkdir -p "$APP_DIR" "$HOME/.cache/knews-curator/images"
+    rm -rf "$APP_DIR/knewsd"
+    cp -r "$PROJECT_DIR/backend/knewsd" "$APP_DIR/knewsd"
+    find "$APP_DIR/knewsd" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    log "code: $APP_DIR/knewsd"
 
-mkdir -p "$UNIT_DIR"
-install -m 644 "$PROJECT_DIR/systemd/knewsd.service" "$UNIT_DIR/knewsd.service"
-sed -i "s/--port [0-9]*/--port $PORT/" "$UNIT_DIR/knewsd.service"
-log "unit: $UNIT_DIR/knewsd.service"
+    mkdir -p "$UNIT_DIR"
+    install -m 644 "$PROJECT_DIR/systemd/knewsd.service" "$UNIT_DIR/knewsd.service"
+    sed -i "s/--port [0-9]*/--port $PORT/" "$UNIT_DIR/knewsd.service"
+    log "unit: $UNIT_DIR/knewsd.service"
 
-# A store install has no unit: the widget starts the daemon itself and publishes where it
-# listens in $XDG_RUNTIME_DIR/knews-curator/endpoint.json. Hand the port back to systemd,
-# otherwise the new unit cannot bind and the old version keeps answering /api/health.
-BOOTSTRAP="$PLASMOID_SRC/contents/backend/bootstrap.sh"
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/knews-curator"
-if [ -f "$RUNTIME_DIR/endpoint.json" ] && [ -f "$BOOTSTRAP" ]; then
-    # No endpoint arguments: the script stops whatever the published endpoint describes, which
-    # covers a widget daemon on another port or on a unix socket.
-    sh "$BOOTSTRAP" --stop >/dev/null 2>&1 || true
-    log "stopped the widget-managed daemon"
+    # A widget-spawned daemon may hold the port; hand it over, otherwise the unit cannot bind and
+    # the old process keeps answering /api/health with a stale version.
+    RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/knews-curator"
+    BOOTSTRAP="$PLASMOID_SRC/contents/backend/bootstrap.sh"
+    if [ -f "$RUNTIME_DIR/endpoint.json" ] && [ -f "$BOOTSTRAP" ]; then
+        # No endpoint arguments: the script stops whatever the published endpoint describes,
+        # which covers a widget daemon on another port or on a unix socket.
+        sh "$BOOTSTRAP" --stop >/dev/null 2>&1 || true
+        log "stopped the widget-managed daemon"
+    fi
+
+    systemctl --user daemon-reload
+    systemctl --user enable knewsd.service
+    systemctl --user restart knewsd.service
+    log "service: $(systemctl --user is-active knewsd.service 2>/dev/null || echo unknown)"
+else
+    printf 'Backend\n'
+    log "none installed: the widget starts, supervises and reaps the daemon it ships"
+    log "no systemd unit, no autostart entry — nothing to enable"
 fi
 
-systemctl --user daemon-reload
-systemctl --user enable knewsd.service
-systemctl --user restart knewsd.service
-log "service: $(systemctl --user is-active knewsd.service 2>/dev/null || echo unknown)"
-
 printf 'Plasma applet\n'
+# The widget ships the backend inside its package; a git checkout only has it after a build.
+if [ ! -f "$PLASMOID_SRC/contents/backend/knewsd.pyz" ]; then
+    [ -x "$PROJECT_DIR/build.sh" ] || die "packaged backend missing and build.sh not found"
+    "$PROJECT_DIR/build.sh" >/dev/null
+    log "built the bundled backend"
+fi
 if ! command -v kpackagetool6 >/dev/null 2>&1; then
     die "kpackagetool6 not found — install the Plasma 6 development tooling"
 fi
@@ -73,8 +105,9 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
 fi
 log "theme icons: newscurator, newscurator-symbolic"
 
-printf 'Health check\n'
-if python3 - "$PORT" <<'PY'
+if [ "$SYSTEMD" = "1" ]; then
+    printf 'Health check\n'
+    if python3 - "$PORT" <<'PY'
 import json, sys, time, urllib.request
 
 port = sys.argv[1]
@@ -93,18 +126,20 @@ while time.time() < deadline:
 print(f"  backend did not answer on {url}: {last}", file=sys.stderr)
 sys.exit(1)
 PY
-then
-    :
-else
-    die "backend health check failed — run: journalctl --user -u knewsd -n 50"
+    then
+        :
+    else
+        die "backend health check failed — run: journalctl --user -u knewsd -n 50"
+    fi
 fi
 
 cat <<EOF
 
 Done.
-  API      http://127.0.0.1:$PORT/api/health
+  Backend  $( [ "$SYSTEMD" = "1" ] \
+      && printf 'systemd --user unit on port %s (journalctl --user -u knewsd -f)' "$PORT" \
+      || printf 'started by the widget; nothing persistent installed' )
   Data     ~/.local/share/knews-curator/curator.db
-  Logs     journalctl --user -u knewsd -f
 
 Add the widget: right-click panel or desktop -> Add Widgets -> "News Curator".
 EOF

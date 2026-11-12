@@ -48,15 +48,20 @@ stop_widget_backend() {
         done
     fi
     [ -f "$LEGACY_PIDFILE" ] && kill "$(cat "$LEGACY_PIDFILE")" 2>/dev/null || true
-    pkill -f "$pyz" 2>/dev/null || true
+    command -v pkill >/dev/null 2>&1 && pkill -f "$pyz" 2>/dev/null || true
     rm -f "$LEGACY_PIDFILE" "$ENDPOINT"
 }
 
 printf 'Removing News Curator\n'
-systemctl --user disable --now knewsd.service >/dev/null 2>&1 || true
-rm -f "$UNIT_DIR/knewsd.service"
-systemctl --user daemon-reload || true
-log "service removed"
+# Only the opt-in --systemd install creates a unit; every path must work without systemd.
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user disable --now knewsd.service >/dev/null 2>&1 || true
+fi
+if [ -f "$UNIT_DIR/knewsd.service" ]; then
+    rm -f "$UNIT_DIR/knewsd.service"
+    command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload >/dev/null 2>&1 || true
+    log "systemd unit removed"
+fi
 
 stop_widget_backend
 log "widget-managed daemon stopped"

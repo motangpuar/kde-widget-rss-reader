@@ -168,6 +168,13 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 no init system in the default path (same branch): `install.sh` installed and enabled
+  a systemd unit even for a store-style install, so a systemd-less desktop had a broken documented
+  path and a unit that outlived GUI removal. Default is now applet + icons only and the widget
+  supervises its own daemon; `--systemd` is the opt-in that adds the unit plus a port handover.
+  `simulate-install.sh` now proves the negative (no unit, no autostart, no daemon after install),
+  then drives `bootstrap.sh` start/stop exactly like the widget does; `dev-reload.sh` falls back
+  to `plasmashell --replace` and a log file when there is no systemd or journald.
 - 2026-11-12 backend lifetime rework (1.9.0, branch `fix/backend-lifetime`): the 1.8.0 widget
   started a daemon *and* wrote an autostart entry, so `kpackagetool6 --remove` left a process
   answering on 8770 and `uninstall.sh` never stopped it. Replaced that model with the

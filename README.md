@@ -31,7 +31,9 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
 
 - Plasma 6 (developed against 6.7), `kpackagetool6`
 - `python3` >= 3.11 on the host (stdlib only — no pip, works on rpm-ostree)
-- systemd user session (for the backend unit)
+- **no init system required**: the widget starts and stops its own backend. A `systemd --user`
+  unit exists as an opt-in extra (`./install.sh --systemd`) for headless refresh, not as a
+  prerequisite.
 
 ## Install
 
@@ -75,30 +77,38 @@ already runs, restarts it when the package ships a newer version, and leaves a f
 systemd-managed daemon holding the port alone. It never writes an autostart entry; an entry left
 behind by 1.8.x is deleted on sight.
 
-### From a release (systemd-managed backend)
+### From a release
 
 ```bash
-# widget + backend + systemd unit   (see Releases for the current version)
+# applet + icons; the widget runs the backend it ships
 curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.9.0.tar.gz
 tar -xzf news-curator-1.9.0.tar.gz && cd news-curator-1.9.0 && ./install.sh
 ```
 
-Use this when you want the daemon run by `systemd --user` (it then also serves the API while no
-widget is on screen, and `journalctl --user -u knewsd` is the log). The widget detects the
-running daemon and does not start a second one.
+`./install.sh` without flags installs **nothing persistent**: no unit, no autostart entry, no
+daemon. That is deliberate — the widget is the supervisor, so no init system is involved and
+nothing can be left running behind a client that does not exist.
+
+Add `--systemd` only if you want the daemon to run without a widget on screen (headless refresh,
+`journalctl --user -u knewsd` as the log). The widget then detects that daemon and does not start
+a second one; the unit's lifetime is owned by systemd, so GUI removal no longer stops it and
+`./uninstall.sh` becomes the way to remove it.
 
 ### From a git checkout
 
 ```bash
 ./build.sh            # dist/: .plasmoid (with bundled backend), tarball, SHA256SUMS
-./install.sh          # backend + systemd unit + applet + icons
+./install.sh          # applet + icons only; the widget runs the backend
+./install.sh --systemd  # same, plus the optional user unit
 ```
 
 Then right-click the desktop or panel → **Add Widgets** → **News Curator**.
 
-`install.sh` copies the backend to `~/.local/share/knews-curator/app`, installs
-`~/.config/systemd/user/knewsd.service`, enables and starts it, installs the applet with
-`kpackagetool6`, and verifies `http://127.0.0.1:8770/api/health`.
+`install.sh` builds the bundled backend if the checkout has none, installs the applet with
+`kpackagetool6`, and installs the theme icons. With `--systemd` it also copies the backend to
+`~/.local/share/knews-curator/app`, installs `~/.config/systemd/user/knewsd.service`, stops a
+widget-managed daemon holding the port, enables and starts the unit, and verifies
+`http://127.0.0.1:8770/api/health`.
 
 Inside a distrobox container the script re-executes itself through `distrobox-host-exec`,
 because Plasma tooling lives in the host session.
@@ -109,10 +119,11 @@ Uninstall (keeps your feeds and read state):
 ./uninstall.sh          # add --purge to delete the database and image cache
 ```
 
-`uninstall.sh` removes everything an install created: the systemd unit, the applet package, the
-icons, the backend copy — plus the daemon a store install started (shut down over its published
-endpoint, so no orphan process is left on the port), the legacy autostart entry, the pid file and
-the runtime directory. The data lives in `~/.local/share/knews-curator` and is only deleted with
+`uninstall.sh` removes everything an install created — whichever install path was used: the
+optional systemd unit, the applet package, the icons, the backend copy, the daemon a widget
+started (shut down over its published endpoint, so no orphan process is left on the port), the
+legacy autostart entry, the pid file and the runtime directory. Nothing is assumed to exist, so
+running it after a plain `install.sh` is safe. The data lives in `~/.local/share/knews-curator` and is only deleted with
 `--purge`.
 
 A GUI removal (*right-click widget → Remove* and *Get New Widgets → Uninstall*) deletes the
@@ -218,8 +229,8 @@ immediately.
 ### Taking feeds out
 
 Gear icon → *Save OPML file…* writes a full OPML 2.0 export wherever the file dialog points
-(`~/Downloads` by default). If the chosen folder is not writable by the systemd unit, the export
-falls back to `~/.local/share/knews-curator/exports/` and the status line says so. Scripted export:
+(`~/Downloads` by default). If the chosen folder is not writable by the daemon's sandbox (only
+relevant with the optional systemd unit), the export falls back to `~/.local/share/knews-curator/exports/` and the status line says so. Scripted export:
 
 ```bash
 curl -sS -H "X-Knews-Client: plasma" -X POST http://127.0.0.1:8770/api/opml/save \
