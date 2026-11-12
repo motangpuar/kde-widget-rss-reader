@@ -168,6 +168,11 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 **1.9.0 released** (`v1.9.0` = `83364b4`, fast-forward merge of
+  `fix/backend-lifetime` into `main`, 4 commits, 22 files, +1725/-259). CI and Release green in
+  36 s / 39 s; assets `io.github.infidel.newscurator-1.9.0.plasmoid` 70 393 B,
+  `news-curator-1.9.0.tar.gz` 121 102 B, `SHA256SUMS`; checksums verified after download and the
+  packaged `main.xml` confirmed to carry the socket default, the `${2?}` fix and the adopt path.
 - 2026-11-12 socket default follow-ups (1.9.0): `activePort` starts at 0 in socket mode so the
   widget no longer fires a request at the unused 8770 before the endpoint line, `channelPort`
   separates the widget's HTTP channel from the configured port (Settings still edits the latter),
