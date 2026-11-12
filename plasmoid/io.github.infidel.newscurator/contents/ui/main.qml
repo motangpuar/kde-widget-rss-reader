@@ -67,6 +67,46 @@ PlasmoidItem {
     Component.onCompleted: {
         Api.setPort(backendPort)
         loadState()
+        // A store install has no installer: the widget starts the backend it ships. The script
+        // answers /api/health first, so this is a no-op when a daemon already runs.
+        backendLauncher.start()
+    }
+
+    BackendLauncher {
+        id: backendLauncher
+        port: root.backendPort
+        onFinished: (state) => {
+            if (state === "running") {
+                statusMessage = i18n("Starting the feed backend…")
+                backendRetry.restart()
+            } else if (state === "already") {
+                backendRetry.restart()
+            } else if (state === "no-python") {
+                statusMessage = i18n("Python 3 is required for the feed backend. "
+                                     + "Install python3, then reopen this widget.")
+            } else if (state === "missing") {
+                statusMessage = i18n("This package has no bundled backend — "
+                                     + "install the full release instead.")
+            } else {
+                statusMessage = i18n("Could not start the feed backend. "
+                                     + "See ~/.cache/knews-curator/knewsd.log")
+            }
+        }
+    }
+
+    // The bootstrap waits for the daemon itself; this timer only re-syncs the UI with it.
+    Timer {
+        id: backendRetry
+        interval: 2500
+        repeat: true
+        running: false
+        onTriggered: {
+            if (backendRetry.attempts++ >= 8)
+                backendRetry.stop()
+            root.loadState()
+        }
+        property int attempts: 0
+        onRunningChanged: if (running) attempts = 0
     }
 
     onBackendPortChanged: {
@@ -106,7 +146,7 @@ PlasmoidItem {
     function fail(status) {
         backendUp = false
         statusMessage = status === 0
-            ? i18n("Backend offline — start the knewsd background service.")
+            ? i18n("Backend offline — starting it, this takes a moment.")
             : i18n("Backend error (HTTP %1).", status)
     }
 

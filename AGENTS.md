@@ -38,6 +38,8 @@ python3 -m knewsd --port 8770        # PYTHONPATH=backend
 ./scripts/ci-local.sh
 # replay the published release download + install (local HTTP mirror, real install)
 ./scripts/simulate-install.sh
+# store-install path: bundled zipapp start / rerun / upgrade / stop
+./scripts/test-bootstrap.sh
 ./scripts/ci-local.sh --skip-tests   # packaging only, used by the CI package job
 ```
 
@@ -51,9 +53,19 @@ Release flow: bump `KPlugin.Version` in
 attaches the artifacts; `.github/workflows/ci.yml` runs the tests and the packaging
 check on every push/PR.
 
+## Bundled backend (store install)
+`build.sh` compiles `backend/knewsd/*.py` into a deterministic zipapp
+(`contents/backend/knewsd.pyz`, gitignored) inside the package. `contents/backend/bootstrap.sh`
+installs it to `~/.local/share/knews-curator/app/`, writes `~/.config/autostart/knewsd.desktop`
+and starts/restarts it; `BackendLauncher.qml` runs that script through
+`org.kde.plasma.plasma5support` (`engine: "executable"`) once per widget load. That is why a
+store package needs no installer: `--stop` undoes it. `scripts/test-bootstrap.sh` covers start,
+idempotent rerun, upgrade restart and stop.
+
 ## Layout
 ```
 backend/knewsd/{config,db,feeds,readability,fetch,api,__main__}.py
+plasmoid/io.github.infidel.newscurator/contents/backend/{bootstrap.sh,knewsd.pyz}
 backend/tests/
 plasmoid/io.github.infidel.newscurator/  # KPackage root (metadata.json + contents/)
 systemd/knewsd.service

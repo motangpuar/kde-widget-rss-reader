@@ -25,7 +25,8 @@ step() { printf '\n== %s\n' "$*"; }
 
 step "shell syntax"
 SHELL_SCRIPTS=("build.sh" "install.sh" "uninstall.sh" "dev-reload.sh" \
-               "scripts/verify-package.sh" "scripts/simulate-install.sh")
+               "scripts/verify-package.sh" "scripts/simulate-install.sh" \
+               "scripts/test-bootstrap.sh")
 for script in "${SHELL_SCRIPTS[@]}"; do
     [ -f "$script" ] || { printf 'error: missing %s\n' "$script" >&2; exit 1; }
     bash -n "$script"
@@ -55,6 +56,11 @@ python3 scripts/check-metadata.py
 if [ "$SKIP_TESTS" -eq 0 ]; then
     step "backend tests"
     python3 -m unittest discover -s backend/tests -t . -q
+fi
+
+if [ "$SKIP_TESTS" -eq 0 ]; then
+    step "backend bootstrap"
+    ./scripts/test-bootstrap.sh | tail -3
 fi
 
 step "build"

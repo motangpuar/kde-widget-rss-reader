@@ -159,6 +159,18 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 branch `feature/self-contained-package`: store install without any script. `build.sh`
+  now emits a deterministic zipapp (`knewsd.pyz`) into the package, `contents/backend/bootstrap.sh`
+  self-installs it (`~/.local/share/knews-curator/app/`, XDG autostart, health-first so it is
+  idempotent, version-aware restart, `--stop`), and `BackendLauncher.qml` runs it via
+  `plasma5support` `engine: "executable"`. Verified live on the host with the systemd unit
+  stopped+disabled: the applet started its own daemon on 8770 against the real 30-feed DB, wrote
+  the autostart entry, then the machine was restored to the systemd unit. Gate extended:
+  `scripts/test-bootstrap.sh` (start/rerun/upgrade/stop), `verify-package.sh` and
+  `check-metadata.py` assert the bundled backend, ci-local runs both. Zipapp had to be built by
+  hand: `python3 -m zipapp` stores member mtimes, so the gate failed reproducibility until the
+  archive was written with fixed timestamps and sorted entries.
+
 - 2026-11-12 v1.7.0 (cont.): `scripts/simulate-install.sh` serves `dist/` on 127.0.0.1:8790 under
   the `/releases/download/<tag>/<asset>` shape and runs the README commands for real. It caught the
   gzip header mtime: `tar --mtime=@0` fixes member mtimes but `-czf` still stores the compression

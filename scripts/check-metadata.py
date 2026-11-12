@@ -91,6 +91,11 @@ def main():
     if not (PKG / "contents" / "config" / "main.xml").is_file():
         fail("contents/config/main.xml is missing")
 
+    # A store install has no installer script, so the daemon has to travel inside the package.
+    for name in ("bootstrap.sh", "knewsd.pyz"):
+        if not (PKG / "contents" / "backend" / name).is_file():
+            fail(f"missing bundled backend contents/backend/{name} (run ./build.sh)")
+
     ui_files = sorted((PKG / "contents" / "ui").glob("*"))
     if not ui_files:
         fail("contents/ui is empty")

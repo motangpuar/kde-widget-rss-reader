@@ -35,29 +35,46 @@ Everything runs on the machine. No accounts, no cloud, no telemetry.
 
 ## Install
 
-### From a release (recommended)
+### From the KDE Store (no scripts)
+
+Download the applet from store.kde.org (or install the `.plasmoid` file with
+`kpackagetool6` / *Add Widgets → Get New Widgets*), then add **News Curator** to the desktop.
+
+That is a complete installation. The package ships the daemon as a single-file zipapp
+(`contents/backend/knewsd.pyz`, stdlib only) plus `bootstrap.sh`; on first load the widget
+copies it to `~/.local/share/knews-curator/app/`, starts it, and writes
+`~/.config/autostart/knewsd.desktop` so it also runs after the next login. No `install.sh`,
+no systemd unit, no terminal.
+
+Requirement: `python3` (3.11+). The widget says so and stays usable if it is missing.
 
 ```bash
-# full install: widget + backend + systemd unit   (see Releases for the current version)
+# equivalent command line, and the only step needed to force a restart or stop:
+sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --port 8770
+sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --stop
+```
+
+The bootstrap is idempotent: it answers `/api/health` first, so it does nothing when a backend
+already runs, restarts it when the package ships a newer version, and leaves a foreign or
+systemd-managed daemon holding the port alone.
+
+### From a release (systemd-managed backend)
+
+```bash
+# widget + backend + systemd unit   (see Releases for the current version)
 curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.7.0.tar.gz
 tar -xzf news-curator-1.7.0.tar.gz && cd news-curator-1.7.0 && ./install.sh
 ```
 
-The widget alone can also be installed without the daemon (it will then report *Backend
-offline*, which is expected until the backend exists):
-
-```bash
-kpackagetool6 --type Plasma/Applet --install io.github.infidel.newscurator-1.7.0.plasmoid
-```
-
-That is exactly the file published to store.kde.org; the store build has no `install.sh` and
-therefore no backend, so the tarball stays the supported path.
+Use this when you want the daemon run by `systemd --user` (it then also serves the API while no
+widget is on screen, and `journalctl --user -u knewsd` is the log). The widget detects the
+running daemon and does not start a second one.
 
 ### From a git checkout
 
 ```bash
+./build.sh            # dist/: .plasmoid (with bundled backend), tarball, SHA256SUMS
 ./install.sh          # backend + systemd unit + applet + icons
-./build.sh            # dist/: .plasmoid for the store, tarball, SHA256SUMS
 ```
 
 Then right-click the desktop or panel → **Add Widgets** → **News Curator**.
@@ -73,6 +90,8 @@ Uninstall (keeps your feeds and read state):
 
 ```bash
 ./uninstall.sh          # add --purge to delete the database and image cache
+# store install: remove the widget, then
+sh <package>/contents/backend/bootstrap.sh --stop
 ```
 
 ## Using it

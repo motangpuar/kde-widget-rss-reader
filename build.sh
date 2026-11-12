@@ -33,6 +33,47 @@ printf 'Building News Curator %s\n' "$VERSION"
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
+# ------------------------------------------------------------------ bundled backend (zipapp)
+# A single-file, stdlib-only zipapp is what lets a store install work without any script:
+# the widget unpacks nothing, it just runs `python3 knewsd.pyz`. It is generated here and
+# dropped into the package (contents/backend is gitignored) so `kpackagetool6 --install`
+# on the source tree and the packaged zip contain the same thing.
+python3 - "$PROJECT_DIR/backend/knewsd" "$PKG_DIR/contents/backend/knewsd.pyz" <<'PYZ'
+"""Deterministic zipapp: sorted entries, fixed timestamps, fixed mode.
+
+`python3 -m zipapp` stores each member's mtime, so two builds a second apart hash differently.
+The archive layout is the zipapp one: a shebang line, then a normal zip with __main__.py first.
+"""
+import pathlib
+import stat
+import sys
+import zipfile
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+target.parent.mkdir(parents=True, exist_ok=True)
+
+stamp = (1980, 1, 1, 0, 0, 0)
+members = [("__main__.py", '"""Zipapp entry point: same CLI as `python3 -m knewsd`."""\n'
+                           "import sys\n\nfrom knewsd.__main__ import main\n\n"
+                           'if __name__ == "__main__":\n    sys.exit(main())\n')]
+members += sorted(
+    (f"knewsd/{path.name}", path.read_text()) for path in source.glob("*.py")
+)
+
+with target.open("wb") as handle:
+    handle.write(b"#!/usr/bin/env python3\n")
+    with zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for name, text in members:
+            info = zipfile.ZipInfo(name, date_time=stamp)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = (stat.S_IFREG | 0o644) << 16
+            archive.writestr(info, text)
+target.chmod(0o755)
+PYZ
+cp "$PKG_DIR/contents/backend/knewsd.pyz" "$DIST/knewsd.pyz"
+printf '  backend  knewsd.pyz (%s)\n' "$(du -h "$DIST/knewsd.pyz" | cut -f1)"
+
 # ---------------------------------------------------------------- widget package (.plasmoid)
 # A KPackage archive is a zip with metadata.json at its root, which is exactly the layout
 # KDE Store expects. Entries are written in sorted order with a fixed timestamp so repeated
