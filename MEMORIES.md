@@ -159,6 +159,14 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 v1.7.0 (cont.): `scripts/simulate-install.sh` serves `dist/` on 127.0.0.1:8790 under
+  the `/releases/download/<tag>/<asset>` shape and runs the README commands for real. It caught the
+  gzip header mtime: `tar --mtime=@0` fixes member mtimes but `-czf` still stores the compression
+  time, so the tarball hash changed between minute-apart builds; the pipeline is now
+  `tar -cf - | gzip -9 -n` and `ci-local.sh` sleeps 2 s between the two builds so the check cannot
+  pass by accident again. Fresh `git clone` of origin/main also passes the gate (no reliance on
+  untracked files).
+
 - 2026-11-12 v1.7.0 (cont.): CI failure was `X-Plasma-MainScript points at a missing file:
   ui/main.qml` — inline checks ran too far from the scripts they validated. Now every CI check is a
   script that `./scripts/ci-local.sh` also runs (plus reproducibility, plus a heredoc guard on the

@@ -36,6 +36,8 @@ python3 -m knewsd --port 8770        # PYTHONPATH=backend
 
 # full local CI gate (what the workflows run) — always run before pushing
 ./scripts/ci-local.sh
+# replay the published release download + install (local HTTP mirror, real install)
+./scripts/simulate-install.sh
 ./scripts/ci-local.sh --skip-tests   # packaging only, used by the CI package job
 ```
 

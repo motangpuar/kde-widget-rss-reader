@@ -24,7 +24,8 @@ done
 step() { printf '\n== %s\n' "$*"; }
 
 step "shell syntax"
-SHELL_SCRIPTS=("build.sh" "install.sh" "uninstall.sh" "dev-reload.sh" "scripts/verify-package.sh")
+SHELL_SCRIPTS=("build.sh" "install.sh" "uninstall.sh" "dev-reload.sh" \
+               "scripts/verify-package.sh" "scripts/simulate-install.sh")
 for script in "${SHELL_SCRIPTS[@]}"; do
     [ -f "$script" ] || { printf 'error: missing %s\n' "$script" >&2; exit 1; }
     bash -n "$script"
@@ -65,6 +66,7 @@ bash scripts/verify-package.sh
 step "reproducible build"
 hash_dist() { sha256sum dist/*.plasmoid dist/*.tar.gz | awk '{print $1}' | tr '\n' ' '; }
 FIRST=$(hash_dist)
+sleep 2   # a same-second rebuild hides gzip mtimes; keep the two builds far enough apart
 ./build.sh >/dev/null
 SECOND=$(hash_dist)
 [ "$FIRST" = "$SECOND" ] || {

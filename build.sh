@@ -74,9 +74,12 @@ for item in plasmoid backend systemd icons install.sh uninstall.sh dev-reload.sh
 done
 find "$ROOT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$ROOT" -name '*.pyc' -delete 2>/dev/null || true
-# Sorted names, zeroed ownership and a fixed mtime keep the tarball byte-identical across builds.
+# Sorted names, zeroed ownership and a fixed mtime keep the members identical; gzip -n keeps the
+# stream identical too. Without -n the gzip header stores the compression time and two builds a
+# minute apart hash differently (tar's -c does not imply gzip -n on older GNU tar).
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
-    -czf "$DIST/news-curator-$VERSION.tar.gz" -C "$STAGE" "news-curator-$VERSION"
+    -cf - -C "$STAGE" "news-curator-$VERSION" | gzip -9 -n \
+    > "$DIST/news-curator-$VERSION.tar.gz"
 rm -rf "$STAGE"
 printf '  bundle   news-curator-%s.tar.gz\n' "$VERSION"
 

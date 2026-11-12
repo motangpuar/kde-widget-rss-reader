@@ -274,6 +274,7 @@ build.sh                                  produces dist/ artifacts
 scripts/ci-local.sh                       runs the whole CI gate locally
 scripts/check-metadata.py                 metadata/version validation (CI + local + release)
 scripts/verify-package.sh                 asserts the built artifacts are shippable
+scripts/simulate-install.sh               plays back the release download + install flow
 .github/workflows/ci.yml                  calls the same scripts on every push
 .github/workflows/release.yml             publishes a GitHub release for every v* tag
 ```
@@ -308,6 +309,7 @@ download to get a working backend.
 
 ```bash
 ./scripts/ci-local.sh                                          # full local CI gate
+./scripts/simulate-install.sh                                  # release download + install, for real
 python3 -m unittest discover -s backend/tests -t backend -v   # 45 tests
 /usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
 ./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
@@ -315,6 +317,12 @@ python3 -m unittest discover -s backend/tests -t backend -v   # 45 tests
 
 `dev-reload.sh` restarts `plasmashell`, which is the only reliable way to reload applet QML
 in Plasma 6.
+
+`simulate-install.sh` builds the artifacts, serves them on `127.0.0.1:8790` under the same
+`/releases/download/<tag>/<asset>` path GitHub uses, then runs the README commands for real:
+`curl -LO`, `sha256sum -c`, `tar -xzf`, `./install.sh`, plus a widget-only install into a
+scratch `XDG_DATA_HOME`. It ends by comparing the installed applet against the downloaded
+tarball, so a broken release is caught before the tag is pushed.
 
 Run the daemon by hand against a scratch database:
 
