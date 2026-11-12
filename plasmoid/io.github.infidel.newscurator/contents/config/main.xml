@@ -4,10 +4,24 @@
       xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
   <kcfgfile name=""/>
   <group name="General">
+    <!-- How clients reach the backend. The widget itself always uses loopback HTTP (QML has no
+         unix-socket transport); in socket mode the daemon also publishes an ephemeral loopback
+         port in $XDG_RUNTIME_DIR/knews-curator/endpoint.json. -->
+    <entry name="connection" type="Enum">
+      <default>port</default>
+      <choices>
+        <choice name="port"/>
+        <choice name="socket"/>
+      </choices>
+    </entry>
     <entry name="port" type="Int">
       <default>8770</default>
       <min>1024</min>
       <max>65535</max>
+    </entry>
+    <!-- Empty means $XDG_RUNTIME_DIR/knews-curator/knewsd.sock -->
+    <entry name="socketPath" type="String">
+      <default></default>
     </entry>
   </group>
 </kcfg>

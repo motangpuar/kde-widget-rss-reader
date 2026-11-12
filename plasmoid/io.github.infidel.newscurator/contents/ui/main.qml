@@ -8,7 +8,26 @@ import "Api.js" as Api
 PlasmoidItem {
     id: root
 
-    readonly property int backendPort: Plasmoid.configuration.port
+    // Connection settings live in KConfig (contents/config/main.xml), so they survive a
+    // plasmashell restart and can be set by any KDE tool, not only by this sheet.
+    readonly property int configuredPort: Plasmoid.configuration.port || 8770
+    readonly property string connectionMode: {
+        var value = Plasmoid.configuration.connection
+        return (value === 1 || value === "socket" || value === "Socket") ? "socket" : "port"
+    }
+    readonly property string configuredSocket: Plasmoid.configuration.socketPath || ""
+    // Loopback channel the widget itself talks to; in socket mode the daemon publishes an
+    // ephemeral port, which the launcher reports back.
+    property int activePort: configuredPort
+    readonly property int backendPort: activePort > 0 ? activePort : configuredPort
+    readonly property string backendEndpointText: {
+        if (connectionMode === "socket") {
+            var path = configuredSocket.length > 0 ? configuredSocket
+                                                   : "$XDG_RUNTIME_DIR/knews-curator/knewsd.sock"
+            return i18n("unix socket %1 — widget channel 127.0.0.1:%2", path, backendPort)
+        }
+        return i18n("127.0.0.1:%1", backendPort)
+    }
     readonly property var prefs: serverPrefs
     readonly property bool compactUi: width < Kirigami.Units.gridUnit * 34
 
@@ -72,9 +91,40 @@ PlasmoidItem {
         backendLauncher.start()
     }
 
+    // The widget is the supervisor: when it goes away, so does the daemon it started.
+    // bootstrap.sh refuses to touch a backend it did not start (e.g. the systemd unit), and the
+    // daemon also reaps itself after KNEWS_IDLE_EXIT seconds without a request.
+    Component.onDestruction: backendLauncher.stop()
+
+    function setBackendConnection(mode, port, socketPath) {
+        Plasmoid.configuration.connection = mode === "socket" ? 1 : 0
+        if (port > 0)
+            Plasmoid.configuration.port = port
+        Plasmoid.configuration.socketPath = socketPath || ""
+        statusMessage = i18n("Restarting the feed backend…")
+        backendLauncher.restart()
+    }
+
+    function backendAction(action) {
+        if (action === "stop") {
+            backendLauncher.stop()
+            backendUp = false
+            statusMessage = i18n("Backend stopped. It starts again when this widget reloads.")
+            return
+        }
+        statusMessage = i18n("Restarting the feed backend…")
+        backendLauncher.restart()
+    }
+
     BackendLauncher {
         id: backendLauncher
-        port: root.backendPort
+        port: root.configuredPort
+        connectionMode: root.connectionMode
+        socketPath: root.configuredSocket
+        onEndpoint: (port, socket, transport) => {
+            if (port > 0)
+                root.activePort = port
+        }
         onFinished: (state) => {
             if (state === "running") {
                 statusMessage = i18n("Starting the feed backend…")
@@ -674,7 +724,13 @@ PlasmoidItem {
             feeds: root.feeds
             backendUp: root.backendUp
             exportDir: root.exportDir
+            connectionMode: root.connectionMode
+            backendPort: root.backendPort
+            socketPath: root.configuredSocket
+            backendEndpoint: root.backendEndpointText
             onClosed: root.settingsOpen = false
+            onBackendSettingsChanged: (mode, port, path) => root.setBackendConnection(mode, port, path)
+            onBackendActionRequested: (action) => root.backendAction(action)
             onPrefChanged: (key, value) => root.setPref(key, value)
             onPrefsPatched: (values) => root.setPrefs(values)
             onRefreshNowRequested: root.startRefresh()

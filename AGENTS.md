@@ -56,11 +56,40 @@ check on every push/PR.
 ## Bundled backend (store install)
 `build.sh` compiles `backend/knewsd/*.py` into a deterministic zipapp
 (`contents/backend/knewsd.pyz`, gitignored) inside the package. `contents/backend/bootstrap.sh`
-installs it to `~/.local/share/knews-curator/app/`, writes `~/.config/autostart/knewsd.desktop`
-and starts/restarts it; `BackendLauncher.qml` runs that script through
-`org.kde.plasma.plasma5support` (`engine: "executable"`) once per widget load. That is why a
-store package needs no installer: `--stop` undoes it. `scripts/test-bootstrap.sh` covers start,
-idempotent rerun, upgrade restart and stop.
+installs it to `~/.local/share/knews-curator/app/` and starts/restarts it;
+`BackendLauncher.qml` runs that script through `org.kde.plasma.plasma5support`
+(`engine: "executable"`) once per widget load, so a store package needs no installer.
+
+## Backend lifetime model
+The backend is a **client-supervised worker** (LSP model), not a system service. Exactly one
+supervisor per deployment:
+
+| Deployment | Supervisor | Lifetime |
+|---|---|---|
+| store package | the widget (`BackendLauncher.qml`) | spawned on widget load, stopped in `Component.onDestruction`, reaped by `KNEWS_IDLE_EXIT` (900 s default) |
+| release tarball | `systemd --user` (`knewsd.service`) | unit owns it; `Environment=KNEWS_IDLE_EXIT=0` disables the reaper |
+
+- **No autostart entry.** 1.8.x wrote `~/.config/autostart/knewsd.desktop`; that scoped the
+  lifetime to the login session instead of to the client and left a daemon behind on uninstall.
+  `bootstrap.sh` and `uninstall.sh` delete it on sight. Never reintroduce it.
+- **Orphan prevention is server-side**: the invariant "no process without a client" is enforced
+  by the idle reaper inside `knewsd`, so a `plasmashell` crash or a `kpackagetool6 --remove`
+  cannot leak a listener. Client cleanup is a convenience, not the guarantee.
+- **Single instance** = `flock` on `$XDG_RUNTIME_DIR/knews-curator/knewsd.lock` **and** bind of
+  the configured endpoint **and** an identity check over `/api/health` (`ok`, `version`, `pid`)
+  before a client trusts a listener. A bound port alone proves nothing.
+- **Transports**: HTTP over loopback (what QML uses — `XMLHttpRequest` cannot speak HTTP over
+  `AF_UNIX`) or a unix socket (`--socket PATH`, port `0`). Socket mode publishes both channels in
+  `$XDG_RUNTIME_DIR/knews-curator/endpoint.json` and prints `BOOTSTRAP_ENDPOINT <json>` for the
+  widget. Never a TCP port on a non-loopback address.
+- **Restart/stop are user-facing**: *Settings → Backend* and `bootstrap.sh --restart|--stop`;
+  `install.sh` calls `--stop` before starting the unit to hand the port over.
+- **systemd hardening gotcha**: `ProtectSystem=strict` makes `$XDG_RUNTIME_DIR` read-only, so the
+  unit lists `ReadWritePaths=-%t/knews-curator`; `config.runtime_dir()` also falls back to the
+  cache dir rather than aborting. `scripts/ci-local.sh` asserts both.
+- `scripts/test-bootstrap.sh` covers: fresh start, idempotent rerun, upgrade restart, explicit
+  restart, socket mode, socket stop, idle reaping of a client-less daemon, foreign daemon left
+  alone, and a clean final stop. No autostart file may appear in any of them.
 
 ## Layout
 ```
@@ -79,4 +108,7 @@ LICENSE
 - Backend must stay stdlib-only (host is an immutable OS; no pip installs).
 - QML: Plasma 6 imports only (`org.kde.plasma.components` 3.0, `org.kde.kirigami`).
 - Mutating API calls require header `X-Knews-Client: plasma` (CSRF guard, no CORS).
-- Never write into host system dirs; everything under `~/.local/share/knews-curator`.
+- Never write into host system dirs; data under `~/.local/share/knews-curator`, scratch under
+  `$XDG_RUNTIME_DIR/knews-curator` (fallback `~/.cache/knews-curator/run`).
+- Every file an installer creates must be removed by `uninstall.sh`; a GUI package removal is
+  covered by the destruction handler + idle reaper, documented in the README.

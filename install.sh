@@ -37,12 +37,15 @@ install -m 644 "$PROJECT_DIR/systemd/knewsd.service" "$UNIT_DIR/knewsd.service"
 sed -i "s/--port [0-9]*/--port $PORT/" "$UNIT_DIR/knewsd.service"
 log "unit: $UNIT_DIR/knewsd.service"
 
-# A store install has no unit: the widget starts the daemon itself and keeps it in
-# ~/.cache/knews-curator/knewsd.pid. Hand the port back to systemd, otherwise the new
-# unit cannot bind and the old version keeps answering /api/health.
+# A store install has no unit: the widget starts the daemon itself and publishes where it
+# listens in $XDG_RUNTIME_DIR/knews-curator/endpoint.json. Hand the port back to systemd,
+# otherwise the new unit cannot bind and the old version keeps answering /api/health.
 BOOTSTRAP="$PLASMOID_SRC/contents/backend/bootstrap.sh"
-if [ -f "$HOME/.cache/knews-curator/knewsd.pid" ] && [ -f "$BOOTSTRAP" ]; then
-    sh "$BOOTSTRAP" --stop --port "$PORT" >/dev/null 2>&1 || true
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/knews-curator"
+if [ -f "$RUNTIME_DIR/endpoint.json" ] && [ -f "$BOOTSTRAP" ]; then
+    # No endpoint arguments: the script stops whatever the published endpoint describes, which
+    # covers a widget daemon on another port or on a unix socket.
+    sh "$BOOTSTRAP" --stop >/dev/null 2>&1 || true
     log "stopped the widget-managed daemon"
 fi
 

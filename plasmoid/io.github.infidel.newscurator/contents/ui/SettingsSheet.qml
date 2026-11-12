@@ -13,8 +13,16 @@ Item {
     property var feeds: []
     property bool backendUp: false
     property string exportDir: ""
+    // Backend connection, mirrored from KConfig by main.qml.
+    property string connectionMode: "port"
+    property int backendPort: 8770
+    property string socketPath: ""
+    property string backendEndpoint: ""
 
     signal closed()
+    signal backendSettingsChanged(string mode, int port, string path)
+    // "restart" | "stop": the widget owns the daemon's lifetime, so the sheet only asks.
+    signal backendActionRequested(string action)
     signal prefChanged(string key, var value)
     signal prefsPatched(var values)
     signal refreshNowRequested()
@@ -916,6 +924,102 @@ Item {
                                 enabled: sheet.backendUp
                                 onClicked: sheet.refreshNowRequested()
                             }
+                        }
+
+                        // Connection: the same daemon can serve a loopback port or a unix
+                        // socket. QML has no unix-socket transport, so socket mode publishes an
+                        // ephemeral loopback port for this widget (endpoint.json).
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Text {
+                                text: i18n("Connection")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            Item { Layout.fillWidth: true }
+                            PlasmaComponents3.ComboBox {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 11
+                                model: [i18n("Local HTTP port"), i18n("Unix socket")]
+                                currentIndex: sheet.connectionMode === "socket" ? 1 : 0
+                                onActivated: (index) => {
+                                    sheet.backendSettingsChanged(index === 1 ? "socket" : "port",
+                                                                 sheet.backendPort,
+                                                                 sheet.socketPath)
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            visible: sheet.connectionMode !== "socket"
+                            Text {
+                                text: i18n("Port")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            Item { Layout.fillWidth: true }
+                            PlasmaComponents3.TextField {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 5.5
+                                text: String(sheet.backendPort)
+                                horizontalAlignment: TextInput.AlignRight
+                                validator: IntValidator { bottom: 1024; top: 65535 }
+                                onEditingFinished: {
+                                    var value = parseInt(text, 10)
+                                    if (!isNaN(value) && value >= 1024 && value <= 65535
+                                            && value !== sheet.backendPort)
+                                        sheet.backendSettingsChanged("port", value, sheet.socketPath)
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            visible: sheet.connectionMode === "socket"
+                            Text {
+                                text: i18n("Socket path")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            PlasmaComponents3.TextField {
+                                Layout.fillWidth: true
+                                text: sheet.socketPath
+                                placeholderText: i18n("default: $XDG_RUNTIME_DIR/knews-curator/knewsd.sock")
+                                onEditingFinished: {
+                                    if (text !== sheet.socketPath)
+                                        sheet.backendSettingsChanged("socket",
+                                                                     sheet.backendPort,
+                                                                     text.trim())
+                                }
+                            }
+                        }
+
+                        // Actions live here so a GUI-only install never needs a terminal.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            PlasmaComponents3.Button {
+                                text: i18n("Restart backend")
+                                icon.name: "view-refresh"
+                                onClicked: sheet.backendActionRequested("restart")
+                            }
+                            PlasmaComponents3.Button {
+                                text: i18n("Stop backend")
+                                icon.name: "process-stop"
+                                onClicked: sheet.backendActionRequested("stop")
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: sheet.backendEndpoint
+                            visible: sheet.backendEndpoint.length > 0
+                            color: Kirigami.Theme.disabledTextColor
+                            font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.68)
+                            elide: Text.ElideMiddle
                         }
 
                         Text {

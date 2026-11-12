@@ -1,6 +1,15 @@
 # MEMORIES — kde-news-curator
 
 ## Current Status
+v1.9.0 (unreleased, branch `fix/backend-lifetime`): backend lifetime fixed and configurable.
+The widget is the sole supervisor of a store install (spawn on load, stop on destruction, idle
+reaper as the server-side backstop); `systemd --user` stays the opt-in tarball path with the
+reaper disabled. New *Settings → Backend* card: connection mode (loopback port or unix socket),
+port, socket path, **Restart backend**, **Stop backend**, endpoint status. `uninstall.sh` now
+removes everything an install created, including a widget-started daemon, the 1.8.x autostart
+entry, the pidfile and `$XDG_RUNTIME_DIR/knews-curator`.
+
+## Previous Status
 v1.7.0: distribution restructure + local CI gate. `build.sh` emits `dist/io.github.infidel.newscurator-<v>.plasmoid`
 (deterministic zip, `metadata.json` at archive root, verified installable with
 `kpackagetool6 --install`), `dist/news-curator-<v>.tar.gz` (plasmoid + backend + unit + icons +
@@ -159,6 +168,24 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-12 backend lifetime rework (1.9.0, branch `fix/backend-lifetime`): the 1.8.0 widget
+  started a daemon *and* wrote an autostart entry, so `kpackagetool6 --remove` left a process
+  answering on 8770 and `uninstall.sh` never stopped it. Replaced that model with the
+  LSP-style client-supervised worker: widget spawns on load, `Component.onDestruction` stops it,
+  and the daemon reaps itself after `KNEWS_IDLE_EXIT` (900 s) so orphaning is impossible even if
+  the client dies; the systemd unit keeps `KNEWS_IDLE_EXIT=0` because there the OS owns the
+  lifetime. Single instance is proven by `flock` in `$XDG_RUNTIME_DIR/knews-curator/` plus an
+  `/api/health` identity check (`ok`/`version`/`pid`), not by a bound port. Added unix-socket
+  transport (`--socket`, port 0, endpoint.json publishes both channels) after establishing that
+  QML `XMLHttpRequest` cannot speak HTTP over `AF_UNIX`, so the widget always keeps a loopback
+  port; *Settings → Backend* now exposes connection mode, port, socket path, restart and stop.
+  `uninstall.sh` shuts a store-installed daemon down over its endpoint, removes the legacy
+  autostart entry, pidfile and runtime dir. Two failures found on the way: `--socket ''` was
+  rejected by `${2:?}`, and `ProtectSystem=strict` made `/run/user/1000` read-only for the unit —
+  `bind` aborted startup with `[Errno 30]`, fixed with `ReadWritePaths=-%t/knews-curator` plus a
+  cache-dir fallback in `config.runtime_dir()` and a ci-local assertion on both. 53 backend tests,
+  `test-bootstrap.sh`, `ci-local.sh` and `simulate-install.sh` green; live host reinstalled and
+  serving 1.9.0.
 - 2026-11-12 release 1.8.0: self-contained package merged. Store `.plasmoid` (15 files, 60 KB)
   carries `contents/backend/knewsd.pyz` + `bootstrap.sh`; widget starts its own daemon through
   `plasma5support`, autostart entry keeps it alive across logins, `--stop` undoes it. Verified live

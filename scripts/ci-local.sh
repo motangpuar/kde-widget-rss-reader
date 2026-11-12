@@ -50,6 +50,40 @@ for wf in "${WORKFLOWS[@]}"; do
     printf '  %s\n' "$wf"
 done
 
+step "systemd unit"
+grep -q '^Environment=KNEWS_IDLE_EXIT=0$' systemd/knewsd.service \
+    || { echo "error: the unit must own the lifetime, so the idle reaper is off" >&2; exit 1; }
+grep -q '^ReadWritePaths=-%t/knews-curator$' systemd/knewsd.service \
+    || { echo "error: the unit needs a writable runtime dir for socket/lock/endpoint" >&2; exit 1; }
+systemd-analyze verify systemd/knewsd.service 2>/dev/null || true
+printf '  lifetime owned by the unit, runtime dir writable, idle reaper off\n'
+
+step "qml root handlers"
+# qmllint does not flag a handler that is declared twice on the root object, and that is a hard
+# runtime error ("Property value set multiple times") that only shows up on a fresh widget load.
+python3 - <<'PY'
+import pathlib
+import re
+import sys
+
+bad = 0
+for path in sorted(pathlib.Path("plasmoid").rglob("*.qml")):
+    seen = {}
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        match = re.match(r"^    (on[A-Z]\w*|Component\.on\w+):", line)
+        if not match:
+            continue
+        name = match.group(1)
+        if name in seen:
+            print(f"error: {path}:{number}: duplicate root handler {name} "
+                  f"(first at line {seen[name]})", file=sys.stderr)
+            bad = 1
+        else:
+            seen[name] = number
+sys.exit(bad)
+PY
+printf '  no duplicate root handlers\n'
+
 step "metadata"
 python3 scripts/check-metadata.py
 

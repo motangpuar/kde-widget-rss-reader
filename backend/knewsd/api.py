@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import socket
+import socketserver
 import sys
 import threading
 import time
@@ -17,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from . import config
 from . import fetch as fetchmod
 from . import feeds as feedmod
-from .config import DEFAULT_PORT, VERSION
+from .config import DEFAULT_IDLE_EXIT, DEFAULT_PORT, VERSION
 from .db import Store
 
 CLIENT_HEADER = "x-knews-client"
@@ -210,10 +212,114 @@ class Api:
         return blob, ctype
 
 
+class Runtime:
+    """Process-wide state shared by every listener: request clock, endpoint, shutdown.
+
+    One daemon may serve the same API over several transports at once (loopback TCP for the
+    widget, a unix socket for tooling). They share this object, so idleness and shutdown are
+    properties of the process, not of one socket.
+    """
+
+    def __init__(self, idle_exit: int = DEFAULT_IDLE_EXIT) -> None:
+        self.started = time.time()
+        self.last_request = time.time()
+        self.idle_exit = max(0, int(idle_exit))
+        self.transport = "port"
+        self.port = 0
+        self.socket = ""
+        self.servers: list[ThreadingHTTPServer] = []
+        self.stopped = threading.Event()
+
+    def touch(self) -> None:
+        self.last_request = time.time()
+
+    def idle_for(self) -> float:
+        return time.time() - self.last_request
+
+    def endpoint(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "version": VERSION,
+            "pid": os.getpid(),
+            "transport": self.transport,
+            "port": self.port,
+            "socket": self.socket,
+            "url": f"http://127.0.0.1:{self.port}" if self.port else "",
+            "idle_exit": self.idle_exit,
+            "started": int(self.started),
+        }
+
+    def publish(self) -> None:
+        """Publish the endpoint so clients (and the widget) can find this process."""
+        target = config.endpoint_path()
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self.endpoint(), indent=1) + "\n")
+            tmp.replace(target)
+        except OSError:
+            pass
+
+    def unpublish(self) -> None:
+        try:
+            current = json.loads(config.endpoint_path().read_text())
+        except (OSError, ValueError):
+            return
+        if current.get("pid") == os.getpid():
+            try:
+                config.endpoint_path().unlink()
+            except OSError:
+                pass
+
+    def stop(self) -> None:
+        """Ask every listener to leave serve_forever; safe to call more than once."""
+        if self.stopped.is_set():
+            return
+        self.stopped.set()
+        for server in list(self.servers):
+            threading.Thread(target=server.shutdown, daemon=True).start()
+
+
+class IdleWatchdog(threading.Thread):
+    """Exit when nobody has talked to us for ``idle_exit`` seconds.
+
+    This is the invariant that makes an orphaned backend impossible: however the client died
+    (crash, kill -9, widget removed, package uninstalled) the process reaps itself.
+    """
+
+    def __init__(self, runtime: Runtime) -> None:
+        super().__init__(daemon=True, name="knewsd-idle")
+        self.runtime = runtime
+
+    def run(self) -> None:
+        interval = 2.0 if self.runtime.idle_exit <= 30 else 5.0
+        while not self.runtime.stopped.is_set():
+            time.sleep(interval)
+            idle = self.runtime.idle_for()
+            if idle >= self.runtime.idle_exit:
+                print(f"knewsd: idle for {idle:.0f}s (limit {self.runtime.idle_exit}s), exiting",
+                      flush=True)
+                self.runtime.stop()
+                return
+
+
+class UnixHTTPServer(ThreadingHTTPServer):
+    """HTTP over AF_UNIX with the same handler as the TCP listener."""
+
+    address_family = socket.AF_UNIX
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind assumes a (host, port) tuple; a unix address is a path.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = 0
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"knewsd/{VERSION}"
     protocol_version = "HTTP/1.1"
     api: Api  # type: ignore[assignment]
+    runtime: Runtime  # type: ignore[assignment]
 
     # -------------------------------------------------------------- plumbing
     def log_message(self, fmt: str, *args: Any) -> None:  # quieter logs
@@ -223,6 +329,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").split(":")[0]
+        if not host:
+            # A TCP peer always sends Host; a unix-socket peer may omit it.
+            return getattr(self.connection, "family", None) == socket.AF_UNIX
         return host in ALLOWED_HOSTS
 
     def _send(self, status: int, payload: Any, ctype: str = "application/json",
@@ -271,6 +380,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ----------------------------------------------------------------- verbs
     def do_GET(self) -> None:  # noqa: N802
+        self.runtime.touch()
         if not self._guard(False):
             return
         parsed = urlparse(self.path)
@@ -278,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
         route = parsed.path
         try:
             if route == "/api/health":
-                self._send(200, {"ok": True, "version": VERSION, **self.api.store.counts()})
+                self._send(200, {**self.runtime.endpoint(), **self.api.store.counts()})
             elif route == "/api/state":
                 self._send(200, self.api.state())
             elif route == "/api/items":
@@ -314,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(500, f"{type(exc).__name__}: {exc}")
 
     def do_POST(self) -> None:  # noqa: N802
+        self.runtime.touch()
         if not self._guard(True):
             return
         parsed = urlparse(self.path)
@@ -443,6 +554,11 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "/api/prefs":
                 prefs = body.get("prefs") or {}
                 self._send(200, {"prefs": store.set_prefs(dict(prefs)) if isinstance(prefs, dict) else store.prefs()})
+            elif route == "/api/shutdown":
+                # Answer first, then leave; the client needs the reply to prove a clean stop.
+                self._send(200, {"ok": True, "stopping": True, "pid": os.getpid()})
+                self.wfile.flush()
+                threading.Timer(0.2, self.runtime.stop).start()
             elif route == "/api/opml":
                 text = str(body.get("opml") or "")
                 added = []
@@ -498,19 +614,179 @@ class AutoRefresher(threading.Thread):
                 continue
 
 
-def build_server(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
+def build_server(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
+                 runtime: Runtime | None = None) -> ThreadingHTTPServer:
+    runtime = runtime or Runtime()
     api = Api(store)
-    handler = type("BoundHandler", (Handler,), {"api": api})
+    handler = type("BoundHandler", (Handler,), {"api": api, "runtime": runtime})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     server.api = api  # type: ignore[attr-defined]
+    server.runtime = runtime  # type: ignore[attr-defined]
+    runtime.port = server.server_address[1]
+    runtime.servers.append(server)
     return server
 
-
-def serve(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
-    server = build_server(store, host, port)
-    AutoRefresher(store, server.api.refresh).start()  # type: ignore[attr-defined]
+def build_unix_server(store: Store, path: str, runtime: Runtime) -> ThreadingHTTPServer:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        # A stale socket from a dead process is normal, and the file lock already proved
+        # nobody else owns this path, so unlinking it is safe.
+        try:
+            target.unlink()
+        except OSError:
+            pass
+    api = Api(store)
+    handler = type("BoundHandler", (Handler,), {"api": api, "runtime": runtime})
+    server = UnixHTTPServer(str(target), handler)
+    server.daemon_threads = True
+    server.api = api  # type: ignore[attr-defined]
+    server.runtime = runtime  # type: ignore[attr-defined]
     try:
-        server.serve_forever(poll_interval=0.5)
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+    runtime.socket = str(target)
+    runtime.servers.append(server)
+    return server
+
+def serve(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
+          socket_path: str | None = None, idle_exit: int = DEFAULT_IDLE_EXIT) -> Runtime:
+    """Serve the API until shutdown; ``port=0`` binds an ephemeral loopback port.
+
+    ``socket_path`` adds a unix listener next to the loopback one. QML cannot open unix
+    sockets, so a socket-mode daemon still needs a loopback channel; its ephemeral port is
+    published in ``endpoint.json``. Socket mode is therefore ``port=0 --socket PATH``.
+    """
+    runtime = Runtime(idle_exit)
+    runtime.transport = "socket" if socket_path else "port"
+    primary = build_server(store, host, port, runtime)
+    if socket_path:
+        build_unix_server(store, socket_path, runtime)
+    runtime.publish()
+    AutoRefresher(store, primary.api.refresh).start()  # type: ignore[attr-defined]
+    if runtime.idle_exit:
+        IdleWatchdog(runtime).start()
+    for server in runtime.servers[1:]:
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.5},
+                         daemon=True).start()
+    try:
+        primary.serve_forever(poll_interval=0.5)
     finally:
-        server.server_close()
+        for server in runtime.servers:
+            server.server_close()
+        runtime.unpublish()
+        if socket_path:
+            try:
+                Path(socket_path).unlink()
+            except OSError:
+                pass
+    return runtime
+
+
+class Client:
+    """Tiny blocking client for the daemon's own transports (used by probes and shutdown).
+
+    Deliberately httplib-free so a unix socket path and a loopback port behave identically,
+    and so bootstrap.sh needs no curl, no socat and no extra dependency on the host.
+    """
+
+    def __init__(self, port: int = 0, socket_path: str = "", timeout: float = 3.0) -> None:
+        self.port = int(port or 0)
+        self.socket_path = str(socket_path or "")
+        self.timeout = timeout
+
+    def _connect(self) -> tuple[socket.socket, str]:
+        if self.socket_path:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            try:
+                sock.connect(self.socket_path)
+            except OSError:
+                sock.close()
+                raise
+            return sock, "localhost"
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(("127.0.0.1", self.port))
+        except OSError:
+            sock.close()
+            raise
+        return sock, f"127.0.0.1:{self.port}"
+
+    def request(self, method: str, route: str, body: dict[str, Any] | None = None,
+                client: bool = False) -> dict[str, Any] | None:
+        payload = b""
+        headers = [f"{method} {route} HTTP/1.1", "Connection: close", "Accept: application/json"]
+        if body is not None:
+            payload = json.dumps(body).encode()
+            headers.append("Content-Type: application/json")
+            headers.append(f"Content-Length: {len(payload)}")
+        if client:
+            headers.append(f"{CLIENT_HEADER}: plasma")
+        try:
+            sock, host = self._connect()
+        except OSError:
+            return None
+        headers.append(f"Host: {host}")
+        blob = ("\r\n".join(headers) + "\r\n\r\n").encode() + payload
+        try:
+            sock.sendall(blob)
+            chunks = []
+            while True:
+                part = sock.recv(65536)
+                if not part:
+                    break
+                chunks.append(part)
+        except OSError:
+            return None
+        finally:
+            sock.close()
+        raw = b"".join(chunks)
+        head, _, data = raw.partition(b"\r\n\r\n")
+        status_line = head.split(b"\r\n", 1)[0]
+        try:
+            status = int(status_line.split()[1])
+        except (IndexError, ValueError):
+            return None
+        if b"transfer-encoding: chunked" in head.lower():
+            out, rest = b"", data
+            while rest:
+                line, _, rest = rest.partition(b"\r\n")
+                try:
+                    size = int(line.strip() or b"0", 16)
+                except ValueError:
+                    return None
+                if size == 0:
+                    break
+                out += rest[:size]
+                rest = rest[size + 2:]
+            data = out
+        try:
+            parsed = json.loads(data)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed.setdefault("status", status)
+            return parsed
+        return {"status": status}
+
+    def health(self) -> dict[str, Any] | None:
+        reply = self.request("GET", "/api/health")
+        if not reply or reply.get("status") != 200 or not reply.get("ok"):
+            return None
+        return reply
+
+    def shutdown(self) -> bool:
+        reply = self.request("POST", "/api/shutdown", {}, client=True)
+        return bool(reply and reply.get("status") == 200 and reply.get("stopping"))
+
+def read_endpoint() -> dict[str, Any]:
+    """Return the endpoint this session's daemon published, if any."""
+    try:
+        data = json.loads(config.endpoint_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

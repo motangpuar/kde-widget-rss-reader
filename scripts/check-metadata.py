@@ -4,7 +4,7 @@
 Used by CI, by scripts/ci-local.sh and by the release workflow, so a packaging mistake fails
 locally instead of on a GitHub runner. Stdlib only.
 
-    python3 scripts/check-metadata.py [--expect-tag v1.8.0] [--require-backend]
+    python3 scripts/check-metadata.py [--expect-tag v1.9.0] [--require-backend]
 
 knewsd.pyz is a build product (gitignored), so it only exists after ./build.sh: it is checked
 when present, and required only with --require-backend (post-build callers).

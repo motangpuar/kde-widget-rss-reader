@@ -42,28 +42,45 @@ Download the applet from store.kde.org (or install the `.plasmoid` file with
 
 That is a complete installation. The package ships the daemon as a single-file zipapp
 (`contents/backend/knewsd.pyz`, stdlib only) plus `bootstrap.sh`; on first load the widget
-copies it to `~/.local/share/knews-curator/app/`, starts it, and writes
-`~/.config/autostart/knewsd.desktop` so it also runs after the next login. No `install.sh`,
-no systemd unit, no terminal.
+copies it to `~/.local/share/knews-curator/app/` and starts it. No `install.sh`, no systemd
+unit, no terminal, no autostart entry.
 
 Requirement: `python3` (3.11+). The widget says so and stays usable if it is missing.
 
+**The widget owns the backend's lifetime** — the backend is a worker process, like a language
+server, not a system service:
+
+- started on demand by the widget, one instance per session (a `flock` in
+  `$XDG_RUNTIME_DIR/knews-curator/` plus a version handshake over `/api/health`);
+- stopped when the widget is destroyed (plasmoid removed, plasmashell restarted);
+- and, as the backstop that makes orphaning impossible, the daemon exits by itself after
+  15 minutes without a request (`KNEWS_IDLE_EXIT`, `0` disables it — the systemd unit sets 0
+  because there the OS owns the lifetime).
+
+The widget talks HTTP over loopback. *Settings → Backend → Connection* can switch the daemon to
+a **unix socket** (`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock` by default) for any other client;
+because QML has no unix-socket transport, socket mode also publishes an ephemeral loopback port
+in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`, which is the channel the widget itself uses.
+The same card has **Restart backend** and **Stop backend**, so a GUI-only install never needs a
+terminal.
+
 ```bash
-# equivalent command line, and the only step needed to force a restart or stop:
+# equivalent command line, for debugging or scripted restarts:
 sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --port 8770
 sh ~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh --stop
 ```
 
 The bootstrap is idempotent: it answers `/api/health` first, so it does nothing when a backend
 already runs, restarts it when the package ships a newer version, and leaves a foreign or
-systemd-managed daemon holding the port alone.
+systemd-managed daemon holding the port alone. It never writes an autostart entry; an entry left
+behind by 1.8.x is deleted on sight.
 
 ### From a release (systemd-managed backend)
 
 ```bash
 # widget + backend + systemd unit   (see Releases for the current version)
-curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.8.0.tar.gz
-tar -xzf news-curator-1.8.0.tar.gz && cd news-curator-1.8.0 && ./install.sh
+curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.9.0.tar.gz
+tar -xzf news-curator-1.9.0.tar.gz && cd news-curator-1.9.0 && ./install.sh
 ```
 
 Use this when you want the daemon run by `systemd --user` (it then also serves the API while no
@@ -90,9 +107,17 @@ Uninstall (keeps your feeds and read state):
 
 ```bash
 ./uninstall.sh          # add --purge to delete the database and image cache
-# store install: remove the widget, then
-sh <package>/contents/backend/bootstrap.sh --stop
 ```
+
+`uninstall.sh` removes everything an install created: the systemd unit, the applet package, the
+icons, the backend copy — plus the daemon a store install started (shut down over its published
+endpoint, so no orphan process is left on the port), the legacy autostart entry, the pid file and
+the runtime directory. The data lives in `~/.local/share/knews-curator` and is only deleted with
+`--purge`.
+
+A GUI removal (*right-click widget → Remove* and *Get New Widgets → Uninstall*) deletes the
+package only; the running daemon is then stopped by the widget's own destruction handler and, at
+the latest, by the idle reaper, so nothing keeps answering on the port afterwards.
 
 ## Using it
 
@@ -108,6 +133,7 @@ sh <package>/contents/backend/bootstrap.sh --stop
 | Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins — every row shows the icon that describes it |
 | Text size in the list | *Settings → Reading* → first row: **Text size in the list**, zoom buttons, 80–160 % |
 | Source of the article you are reading | the reader header shows the feed favicon next to the feed name |
+| Backend connection, restart, stop | *Settings → Backend*: HTTP port or unix socket, port / socket path, **Restart backend**, **Stop backend** |
 | Mark all read | read icon in the header → confirmation dialog → **Mark read** |
 | Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
 | Delete a feed | *Settings → Feeds* → trash icon on the row → click again to confirm |
@@ -315,7 +341,7 @@ disagrees, and writes:
 ### Releasing
 
 ```bash
-git tag -a v1.8.0 -m "News Curator 1.8.0"
+git tag -a v1.9.0 -m "News Curator 1.9.0"
 git push origin main --follow-tags
 ```
 
