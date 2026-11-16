@@ -122,6 +122,8 @@ supervisor per deployment:
 
 ## Layout
 ```
+README.md                     user-facing: install, use, settings, troubleshooting
+docs/{ARCHITECTURE,API,DEVELOPMENT}.md   developer and operator docs
 backend/knewsd/{config,db,feeds,readability,fetch,api,__main__}.py
 plasmoid/io.github.infidel.newscurator/contents/backend/{bootstrap.sh,knewsd.pyz}
 backend/tests/
@@ -152,4 +154,4 @@ LICENSE
 - Never write into host system dirs; data under `~/.local/share/knews-curator`, scratch under
   `$XDG_RUNTIME_DIR/knews-curator` (fallback `~/.cache/knews-curator/run`).
 - Every file an installer creates must be removed by `uninstall.sh`; a GUI package removal is
-  covered by the destruction handler + idle reaper, documented in the README.
+  covered by the destruction handler + idle reaper, documented in `docs/ARCHITECTURE.md`.

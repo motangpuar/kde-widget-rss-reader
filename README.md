@@ -1,442 +1,167 @@
-# News Curator — KDE Plasma 6 applet
+# News Curator
 
-Feed reader and news curator for the Plasma desktop: Inoreader-style feed management,
-a built-in reader view (Instapaper / Firefox Reader flavour), and a local-only backend.
+Feed reader for the KDE Plasma 6 desktop. It keeps subscriptions, articles, read state and
+cached images on the local machine. No account, no cloud, no telemetry.
 
-Everything runs on the machine. No accounts, no cloud, no telemetry.
+[![KDE Store](https://img.shields.io/badge/KDE%20Store-install-1f6feb?logo=kde&logoColor=white)](https://www.opendesktop.org/p/2381657/)
+[![release](https://img.shields.io/github/v/release/motangpuar/kde-widget-rss-reader?label=release&color=blue)](https://github.com/motangpuar/kde-widget-rss-reader/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/motangpuar/kde-widget-rss-reader/total?label=downloads&logo=kde&logoColor=white&color=1f6feb)](https://github.com/motangpuar/kde-widget-rss-reader/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/motangpuar/kde-widget-rss-reader/ci.yml?label=CI)](https://github.com/motangpuar/kde-widget-rss-reader/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/motangpuar/kde-widget-rss-reader?label=license&color=blue)](LICENSE)
 
-## What you get
+Plasmoid ID: `io.github.infidel.newscurator`
 
-- **Plasma 6 applet** (`io.github.infidel.newscurator`) — three panes: feeds, article list, reader.
-- **Local daemon** (`knewsd`) — stdlib-only Python, SQLite, JSON over a unix socket by default
-  (`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock`) or a loopback port if you prefer TCP.
-- **Reader view** — server-side extraction into structured blocks (paragraphs with inline
-  bold/italic/links, headings, lists, quotes, code, images) rendered by QML; not HTML in a
-  WebView, so it stays fast, theme-consistent and offline-readable.
-- **Offline images** — remote images are cached under `~/.cache/knews-curator/images` and
-  served as `file://` URIs.
-- **Feed discovery** — type a site address (`lwn.net`, `arstechnica.com`, a channel URL) and the
-  applet searches the page for feeds, like Inoreader's follow box.
-- **Source icons** — cached favicons in the scope menu, on the scope button when a single feed is
-  selected, and next to the source name in the article list.
-- **Formats** — RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed; OPML import/export.
-- **Bulk follow** — paste a list of addresses, validate them all in parallel, then follow only the
-  ones that actually serve a feed.
-- **Guarded adds** — the follow dialog validates a URL before offering *Follow*, so a typo or a
-  dead feed never lands in your list.
-- **Feed removal** — *Settings → Feeds*, trash icon on the row (second click confirms).
-- **State** — unread counts, folders, stars, mark-all-read, background refresh with
-  ETag/Last-Modified conditional requests.
+## Features
+
+- Scope menu with folders, single feeds and the smart views Unread, Starred and All.
+- Article list with unread counts, stars, source icons and infinite scroll.
+- Reader view that renders extracted blocks (paragraphs, headings, lists, quotes, code, images)
+  with QML instead of a WebView, so it follows Plasma colours, fonts and scaling.
+- Feed discovery: type `lwn.net` or `blog.example.org` and pick from the feeds the page declares.
+- RSS 2.0, RSS 1.0/RDF, Atom and JSON Feed. OPML import and export.
+- Offline image cache under `~/.cache/knews-curator/images`.
+- Local backend over a unix socket by default, a loopback port on request.
+- Daily update check with a release dialog. The widget links to the release page and never
+  installs anything itself.
 
 ## Requirements
 
-- Plasma 6 (developed against 6.7), `kpackagetool6`
-- `python3` >= 3.11 on the host (stdlib only — no pip, works on rpm-ostree)
-- **no init system required**: the widget starts and stops its own backend. A `systemd --user`
-  unit exists as an opt-in extra (`./install.sh --systemd`) for headless refresh, not as a
-  prerequisite.
+| Item | Detail |
+|---|---|
+| Desktop | Plasma 6 (developed against 6.7) |
+| Python | `python3` 3.11 or newer on the host, standard library only |
+| Init system | none needed; systemd is optional and opt-in |
+| Build tools | none for the release tarball; `kpackagetool6` for a manual install |
 
 ## Install
 
-### From the KDE Store (no scripts)
+### From the KDE store
 
-Download the applet from store.kde.org (or install the `.plasmoid` file with
-`kpackagetool6` / *Add Widgets → Get New Widgets*), then add **News Curator** to the desktop.
+Search for *News Curator* under **Plasma Add-Ons → Applets**, or install the `.plasmoid` from the
+latest release. The package carries the backend, so the widget starts it on first load.
 
-That is a complete installation. The package ships the daemon as a single-file zipapp
-(`contents/backend/knewsd.pyz`, stdlib only) plus `bootstrap.sh`; on first load the widget
-copies it to `~/.local/share/knews-curator/app/` and starts it. No `install.sh`, no systemd
-unit, no terminal, no autostart entry.
-
-Requirement: `python3` (3.11+). The widget says so and stays usable if it is missing.
-
-**The widget owns the backend's lifetime** — the backend is a worker process, like a language
-server, not a system service:
-
-- started on demand by the widget, one instance per session (a `flock` in
-  `$XDG_RUNTIME_DIR/knews-curator/` plus a version handshake over `/api/health`);
-- stopped when the widget is destroyed (plasmoid removed, plasmashell restarted);
-- and, as the backstop that makes orphaning impossible, the daemon exits by itself after
-  15 minutes without a request (`KNEWS_IDLE_EXIT`, `0` disables it — the systemd unit sets 0
-  because there the OS owns the lifetime).
-
-**Transport: unix socket by default.** The daemon listens on
-`$XDG_RUNTIME_DIR/knews-curator/knewsd.sock` — no TCP listener exists unless you choose the port
-mode in *Settings → Backend → Connection*. Because QML has no unix-socket transport, the daemon
-also publishes an ephemeral **loopback** port in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`
-and prints it (`BOOTSTRAP_ENDPOINT <json>`) for the widget, so both channels always work.
-The same card has the socket path, **Restart backend** and **Stop backend**, so a GUI install
-never needs a terminal.
+### From a release tarball
 
 ```bash
-# equivalent command line, for debugging or scripted restarts:
-BOOT=~/.local/share/plasma/plasmoids/io.github.infidel.newscurator/contents/backend/bootstrap.sh
-sh "$BOOT" --socket ''        # the widget default: unix socket at the runtime path
-sh "$BOOT" --port 8770        # loopback TCP instead
-sh "$BOOT" --stop             # follows whatever endpoint is published, no arguments needed
-
-# talking to a socket-mode daemon by hand:
-python3 ~/.local/share/knews-curator/app/knewsd.pyz --probe --socket "$XDG_RUNTIME_DIR/knews-curator/knewsd.sock"
+# download news-curator-<version>.tar.gz from
+# https://github.com/motangpuar/kde-widget-rss-reader/releases/latest
+tar -xzf news-curator-*.tar.gz && cd news-curator-*/
+./install.sh
 ```
 
-The bootstrap is idempotent: it answers `/api/health` first, so it does nothing when a backend
-already runs, restarts it when the package ships a newer version, and leaves a foreign or
-systemd-managed daemon holding the port alone.
+`./install.sh` installs the applet and the icons. It writes no unit, no autostart entry and starts
+no process: the widget runs the backend it ships.
 
-New releases are noticed without a store client: once a day the widget compares its own version
-with the latest GitHub release and, if `notify-send` is available, sends a single notification.
-The result is a row above the article list and a card in *Settings → Updates* with **Check now**
-and **Skip this version** — it never downloads or installs anything. The check is opt-out and any
-network failure stays silent.
-
-If the daemon dies anyway — killed by the OOM reaper, torn down with the session, or crashed —
-the widget restarts it on its own: a supervisor timer retries with backoff (5 s doubling to
-60 s, reset as soon as `/api/state` answers). No reload, no terminal. Idleness is measured in
-*running* time, so a laptop that slept for a night does not look idle and the daemon is not
-reaped while the widget is on screen; the single-instance lock lives in the data directory, so a
-session that removes `$XDG_RUNTIME_DIR` cannot leave two daemons on one database. It never writes an autostart entry; an entry left
-behind by 1.8.x is deleted on sight.
-
-### From a release
-
-```bash
-# applet + icons; the widget runs the backend it ships
-curl -LO https://github.com/motangpuar/kde-widget-rss-reader/releases/latest/download/news-curator-1.9.0.tar.gz
-tar -xzf news-curator-1.9.0.tar.gz && cd news-curator-1.9.0 && ./install.sh
-```
-
-`./install.sh` without flags installs **nothing persistent**: no unit, no autostart entry, no
-daemon. That is deliberate — the widget is the supervisor, so no init system is involved and
-nothing can be left running behind a client that does not exist.
-
-Add `--systemd` only if you want the daemon to run without a widget on screen (headless refresh,
-`journalctl --user -u knewsd` as the log). The widget then detects that daemon and does not start
-a second one; the unit's lifetime is owned by systemd, so GUI removal no longer stops it and
-`./uninstall.sh` becomes the way to remove it.
+Add `--systemd` only when the backend should keep refreshing while no widget is loaded. That path
+installs `knewsd.service` in the user manager, and `./uninstall.sh` removes it again.
 
 ### From a git checkout
 
-```bash
-./build.sh            # dist/: .plasmoid (with bundled backend), tarball, SHA256SUMS
-./install.sh          # applet + icons only; the widget runs the backend
-./install.sh --systemd  # same, plus the optional user unit
-```
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-Then right-click the desktop or panel → **Add Widgets** → **News Curator**.
+## First run
 
-`install.sh` builds the bundled backend if the checkout has none, installs the applet with
-`kpackagetool6`, and installs the theme icons. With `--systemd` it also copies the backend to
-`~/.local/share/knews-curator/app`, installs `~/.config/systemd/user/knewsd.service`, stops a
-widget-managed daemon holding the port, enables and starts the unit, and verifies
-`http://127.0.0.1:8770/api/health`.
+1. Right-click the panel or desktop, choose **Add Widgets**, then **News Curator**.
+2. Press `+` in the widget header and type a site address. **Find feeds** lists what the page
+   declares, **Follow** subscribes to one entry.
+3. Optional: import an OPML file from *Settings → Feeds*.
 
-Inside a distrobox container the script re-executes itself through `distrobox-host-exec`,
-because Plasma tooling lives in the host session.
-
-Uninstall (keeps your feeds and read state):
-
-```bash
-./uninstall.sh          # add --purge to delete the database and image cache
-```
-
-`uninstall.sh` removes everything an install created — whichever install path was used: the
-optional systemd unit, the applet package, the icons, the backend copy, the daemon a widget
-started (shut down over its published endpoint, so no orphan process is left on the port), the
-legacy autostart entry, the pid file and the runtime directory. Nothing is assumed to exist, so
-running it after a plain `install.sh` is safe. The data lives in `~/.local/share/knews-curator` and is only deleted with
-`--purge`.
-
-A GUI removal (*right-click widget → Remove* and *Get New Widgets → Uninstall*) deletes the
-package only; the running daemon is then stopped by the widget's own destruction handler and, at
-the latest, by the idle reaper, so nothing keeps answering on the port afterwards.
+The first refresh starts immediately. Articles appear as each feed answers.
 
 ## Using it
 
 | Action | Where |
 |---|---|
-| Add feed | `+` in the header: type an address, **Find feeds**, pick a result, **Follow** |
-| Feed folders | type a folder name in the follow dialog |
-| Read an article | click a row — opens the built-in reader |
-| Open in browser | `internet-services` icon, list row, or reader toolbar |
+| Change the scope | the scope button in the header: icon, name, chevron. The menu holds Unread, Starred, All items, then folder submenus, then ungrouped feeds |
+| Add a feed | `+` in the header |
+| Read an article | click a row; the reader replaces the list |
+| Open in browser | `internet-services` on a row, or the reader toolbar |
 | Star | star icon on a row or in the reader toolbar |
-| Browse by folder or source | the title button in the list header opens the scope menu, left-aligned under the button: smart views, one submenu per folder (folder itself + its feeds), then ungrouped feeds. Every entry has an icon and the button shows the current one |
-| Move a feed into a folder | *Settings → Feeds* → folder icon on the row → pick a folder (or **No folder**) |
-| Text appearance while reading | `Text` button at the end of the reader toolbar: theme, font, size, line spacing, margins — every row shows the icon that describes it |
-| Text size in the list | *Settings → Reading* → first row: **Text size in the list**, zoom buttons, 80–160 % |
-| Source of the article you are reading | the reader header shows the feed favicon next to the feed name |
-| Backend connection, restart, stop | *Settings → Backend*: HTTP port or unix socket, port / socket path, **Restart backend**, **Stop backend** |
-| Mark all read | read icon in the header → confirmation dialog → **Mark read** |
-| Undo mark-all | the notice banner keeps an *Undo* button for 9 seconds |
-| Delete a feed | *Settings → Feeds* → trash icon on the row → click again to confirm |
-| Manage feeds | gear icon → *Feeds*: grouped by folder, per-row edit / pause / delete |
-| Settings | gear icon: reading behaviour, headline size, feed management (folder picker, edit, pause, delete), bulk add, OPML, backend status |
-| Re-extract | refresh icon in the reader toolbar (re-fetches the original page) |
+| Mark everything read | `mail-mark-read` in the header, then confirm. The notice banner keeps an Undo for 9 seconds |
+| Refresh now | `view-refresh` in the header |
+| Search | `edit-find` in the header toggles the search field. `Enter` closes it |
+| Text appearance in the reader | `Text` button at the end of the reader toolbar |
+| List text size | *Settings → Reading*, first row |
+| Backend status or a new release | the strip above the list, visible only when it has something to report |
 
-Reader themes: `auto` (follows Plasma colours), `light`, `sepia`, `dark`.
+## Settings
 
-Typography lives in the reader only: the `Text` button at the end of the toolbar opens a menu of
-five submenus (theme, font, size, line spacing, margins), each carrying its own icon and a
-checkmark on the active value. There is no typography in the settings sheet, so the two can no
-longer disagree. Every entry maps to a stored preference: theme (`reader_theme`), font
-(`font_family` + `serif`), text size (`font_scale`, 80–160 %), line spacing (`line_height`) and
-side margins (`reader_padding`, 60–180 %). The font list is filtered against `Qt.fontFamilies()`,
-so a family that is not installed never appears; `Typography.js` holds the tables.
-
-### Following a site
-
-Click `+` in the header and type any of these:
-
-| You type | What happens |
+| Card | Contents |
 |---|---|
-| `lwn.net` | page scan → `https://lwn.net/headlines/rss` |
-| `https://arstechnica.com` | page scan → `https://arstechnica.com/feed/` |
-| `https://…/rss.xml` | recognised directly, no scan |
-| `example.substack.com` | page scan → `/feed` |
+| Reading | list text size, reader theme, font, size, line height, measure, padding |
+| Backend | connection mode (unix socket or loopback port), socket path or port, **Restart backend**, **Stop backend**, **Refresh source icons** |
+| Feeds | grouped subscription list, inline edit, pause, delete, folder move, OPML export and import |
+| Updates | daily check switch, **Check now**, **Details…** when a release exists, **Reset** for a skipped version |
 
-Every candidate shows its title, URL, feed count and favicon; feeds you already follow are marked
-*Already followed*. Discovery takes a second or two per site; the result list is cached nowhere, so
-run it again if you typed the wrong address.
+## Backend and recovery
 
-Sites that build their feeds with JavaScript (some YouTube channel pages, Reddit user pages) are
-rejected with "could not reach …" — paste the feed URL directly for those.
+The widget supervises one backend process per user. It starts on widget load, stops on widget
+destruction, and restarts on its own after a crash, an OOM kill or a session teardown, with a
+5 second to 60 second backoff. The daemon also exits by itself after 15 minutes without a request,
+which covers a client that disappeared. A strip above the list reports the state and offers
+**Restart backend** as a shortcut.
 
-### Bringing feeds over from another reader
+The transport is a unix socket at `$XDG_RUNTIME_DIR/knews-curator/knewsd.sock`. QML has no unix
+socket support, so the daemon also publishes a loopback port in
+`$XDG_RUNTIME_DIR/knews-curator/endpoint.json` for the widget itself. Port mode replaces the
+socket with a fixed loopback port.
 
-1. **Import a file** — gear icon → *Import OPML file…* → pick the `.opml`/`.xml` export from
-   Feedly, Inoreader, FreshRSS, Newsboat, … Nested OPML folders become feed folders;
-   `xmlUrl`/`xmlurl`, `title`/`text` are both accepted.
-2. **Bulk add addresses** — gear icon → *Add several feeds* → paste one address per line →
-   *Check addresses* → *Follow checked feeds* (folder optional). All addresses are probed in
-   parallel; rows show the resolved title and item count, dead ones show the HTTP error, and
-   feeds you already follow are marked so they are skipped.
-3. **Import from disk over the API** (scripted, no copy-paste):
+Design, invariants and failure modes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-```bash
-python3 - <<'EOF'
-import json, urllib.request
-opml = open("feeds.opml", encoding="utf-8").read()
-req = urllib.request.Request(
-    "http://127.0.0.1:8770/api/opml",
-    data=json.dumps({"opml": opml}).encode(),
-    headers={"X-Knews-Client": "plasma", "Content-Type": "application/json"})
-res = json.load(urllib.request.urlopen(req))
-print("imported", len([e for e in res["imported"] if "error" not in e]), "feeds")
-for entry in res["imported"]:
-    if "error" in entry:
-        print("FAILED", entry["url"], entry["error"])
-EOF
-```
+## Troubleshooting
 
-Feeds are fetched immediately; failures are reported per URL and can be retried from Settings.
-
-### Managing subscriptions in Settings
-
-The *Feeds* section groups every subscription under its folder (ungrouped feeds last) and gives
-each row four actions:
-
-| Action | Effect |
+| Symptom | Check |
 |---|---|
-| pencil | inline editor for title, folder and address |
-| pause / play | stop or resume background fetching (`enabled` in the DB) |
-| trash (×2) | delete the feed and its items, second click confirms |
-| folder `+` | open the follow dialog with that folder prefilled |
-
-Changing the address is guarded: the new URL is fetched and parsed first, and it is rejected with
-*that address is already followed* if another subscription already points at it, so a mistyped
-address can never empty a working feed. A successful change clears the stored ETag and re-fetches
-immediately.
-
-### Taking feeds out
-
-Gear icon → *Save OPML file…* writes a full OPML 2.0 export wherever the file dialog points
-(`~/Downloads` by default). If the chosen folder is not writable by the daemon's sandbox (only
-relevant with the optional systemd unit), the export falls back to `~/.local/share/knews-curator/exports/` and the status line says so. Scripted export:
-
-```bash
-curl -sS -H "X-Knews-Client: plasma" -X POST http://127.0.0.1:8770/api/opml/save \
-     -d '{"path": "~/Downloads/news-curator.opml"}'
-# {"ok": true, "path": "...", "feeds": 10, "bytes": 1835, "fallback": false}
-```
-
-Single feeds: `+` in the header, or `POST /api/feeds {"url": "...", "folder": "Tech"}`.
-
-```bash
-# any site
-https://lwn.net/headlines/rss
-# Substack / Ghost / WordPress
-https://example.substack.com/feed
-# YouTube channel (channel_id from the channel page source)
-https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxxxx
-# Reddit subreddit, GitHub releases
-https://www.reddit.com/r/linux/.rss
-https://github.com/kde/plasma-desktop/releases.atom
-```
-
-## Architecture
-
-```
-plasmoid/io.github.infidel.newscurator/   Plasma applet (QML only)
-  contents/ui/main.qml                    PlasmoidItem, state + API orchestration
-  contents/ui/ArticleList.qml             list, filters, search, infinite scroll
-  contents/ui/ReaderView.qml              block renderer + in-reader typography menu
-  contents/ui/AddFeedSheet.qml            add-feed overlay
-  contents/ui/SettingsSheet.qml           preferences, feed management, OPML
-  contents/ui/Api.js                      HTTP client, formatting helpers
-  contents/ui/Typography.js               shared theme/font/size tables (reader + settings)
-backend/knewsd/                           Python daemon (stdlib only)
-  feeds.py                                RSS/Atom/JSON parsing, OPML
-  readability.py                          DOM pruning + block extraction
-  fetch.py                                conditional HTTP, image cache, refresh
-  db.py                                   SQLite store (WAL)
-  api.py                                  HTTP JSON API + background refresh
-```
-
-The plasmoid never parses HTML. The daemon converts articles into blocks:
-
-```json
-{"type": "paragraph", "runs": [{"text": "Hello ", "b": false, "i": false, "href": ""}]}
-{"type": "heading", "level": 2, "text": "..."}
-{"type": "list", "ordered": false, "items": [[run...], [run...]]}
-{"type": "quote", "runs": [...]}
-{"type": "code", "text": "..."}
-{"type": "image", "src": "file:///...", "alt": "", "caption": ""}
-{"type": "divider"}
-```
-
-QML renders those natively, so the reader inherits Plasma colours and fonts, respects
-font scaling, and works with the network off once an article is extracted.
-
-## API
-
-Bind to loopback only. All state-changing POSTs must carry `X-Knews-Client: plasma`;
-requests with an `Origin` header or a non-loopback `Host` are rejected.
-
-```
-GET  /api/health              {"ok": true, "version": "1.2.0"}
-GET  /api/state               feeds, folders, counts, prefs
-GET  /api/items?view=&feed=&folder=&q=&limit=&offset=
-GET  /api/item?id=&read=1     article detail with blocks
-GET  /api/thumb?id=           cached thumbnail bytes
-GET  /api/discover?url=       feed discovery: {ok, direct, candidates[{url,title,icon,entries,existing}]}
-GET  /api/validate?url=       strict single-URL probe: {ok, title, entries, empty, error, existing}
-POST /api/validate            {"urls": [...]} → {"results": [{ok, title, entries, error, existing}]}
-POST /api/feeds/bulk          {"urls": [...], "folder": ""} → {"ok", "added", "results", "state"}
-POST /api/opml/save           {"path": "/abs/or/~/file.opml"} → {ok, path, bytes, feeds, fallback}
-GET  /api/refresh/status      background refresh progress
-GET  /api/opml                OPML export
-POST /api/feeds               {"url": "...", "folder": "..."}
-POST /api/feeds/delete        {"id": 1}
-POST /api/feeds/update        {"id": 1, "title": "...", "folder": "...", "enabled": 1}
-POST /api/feeds/move          {"ids": [1, 2], "folder": "Tech"} → {"ok", "moved", "folder", "state"}
-                              (API-only: the applet moves one feed at a time via /api/feeds/update)
-POST /api/feeds/update        {"id": 1, "url": "https://..."} — re-probes, then retargets
-POST /api/item                {"id": 1, "read": 1} / {"id": 1, "starred": 1}
-POST /api/mark-all            {} or {"feed": 1} or {"folder": "Tech"}
-POST /api/mark-unread         {} / {"feed": 1} / {"folder": "Tech"} / {"ids": [1, 2]}
-POST /api/refresh             {} or {"feed": 1}
-POST /api/prefs               {"reader_theme": "sepia", ...}
-POST /api/opml                {"opml": "<opml>...</opml>"}
-POST /api/extract             {"id": 1} — force re-extraction
-```
-
-## Distribution
-
-```
-plasmoid/io.github.infidel.newscurator/   KPackage root: metadata.json + contents/
-backend/knewsd/                           stdlib-only daemon
-systemd/knewsd.service                    user unit (port templated by install.sh)
-icons/                                    theme icons, installed to hicolor
-build.sh                                  produces dist/ artifacts
-scripts/ci-local.sh                       runs the whole CI gate locally
-scripts/check-metadata.py                 metadata/version validation (CI + local + release)
-scripts/verify-package.sh                 asserts the built artifacts are shippable
-scripts/simulate-install.sh               plays back the release download + install flow
-.github/workflows/ci.yml                  calls the same scripts on every push
-.github/workflows/release.yml             publishes a GitHub release for every v* tag
-```
-
-All checks live in `scripts/`, and the workflows only call them — so `./scripts/ci-local.sh`
-reproduces CI byte for byte (same metadata validation, same packaging assertions, same
-reproducibility check) before anything is pushed. Workflow files are additionally linted for
-inline shell heredocs, which are the one thing that cannot be tested locally.
-
-`build.sh` reads the version from `metadata.json`, refuses to run when `backend/knewsd/config.py`
-disagrees, and writes:
-
-| Artifact | Contents |
-|---|---|
-| `io.github.infidel.newscurator-<v>.plasmoid` | zip whose root is `metadata.json` + `contents/` — KPackage and store.kde.org accept it as-is |
-| `news-curator-<v>.tar.gz` | `news-curator-<v>/` with plasmoid, backend, unit, icons, installer |
-| `SHA256SUMS` | checksums of both |
-
-### Releasing
-
-```bash
-git tag -a v1.9.0 -m "News Curator 1.9.0"
-git push origin main --follow-tags
-```
-
-The `Release` workflow runs the tests, fails when the tag and `metadata.json` version disagree,
-builds the artifacts, and attaches them to a GitHub release. Upload the `.plasmoid` from that
-release to store.kde.org (Plasma 6 → *Plasma Add-Ons* → *Applets*); the tarball is what users
-download to get a working backend.
-
-## Development
-
-```bash
-./scripts/ci-local.sh                                          # full local CI gate
-./scripts/simulate-install.sh                                  # release download + install, for real
-python3 -m unittest discover -s backend/tests -t backend -v   # 45 tests
-/usr/lib/qt6/bin/qmllint -I /usr/lib64/qt6/qml plasmoid/io.github.infidel.newscurator/contents/ui/*.qml
-./dev-reload.sh        # push plasmoid to host, restart plasmashell, print QML errors
-```
-
-`dev-reload.sh` restarts `plasmashell`, which is the only reliable way to reload applet QML
-in Plasma 6.
-
-`simulate-install.sh` builds the artifacts, serves them on `127.0.0.1:8790` under the same
-`/releases/download/<tag>/<asset>` path GitHub uses, then runs the README commands for real:
-`curl -LO`, `sha256sum -c`, `tar -xzf`, `./install.sh`, plus a widget-only install into a
-scratch `XDG_DATA_HOME`. It ends by comparing the installed applet against the downloaded
-tarball, so a broken release is caught before the tag is pushed.
-
-Run the daemon by hand against a scratch database:
-
-```bash
-KNEWS_DB=/tmp/scratch.db python3 -m knewsd --port 8899
-```
-
-Set `KNEWS_ACCESS_LOG=1` to log every HTTP request to stderr (the systemd unit enables it).
-`journalctl --user -u knewsd -f` is the first place to look when the applet says "Backend offline".
+| The strip shows *Backend stopped responding* | the supervisor restarts it within 20 seconds. For a manual restart use *Settings → Backend → Restart backend* |
+| Strip stays after a restart | `journalctl --user -b \| grep newscurator` for bootstrap lines, then `~/.cache/knews-curator/knewsd.log` |
+| A feed shows no icon | some sites declare none and return 404 for `/favicon.ico`; the browser shows a generic icon there too. *Refresh source icons* retries the whole list |
+| Wrong icon after a site redesign | *Settings → Backend → Refresh source icons* |
+| No update notice | the check runs once a day and is opt-out. *Settings → Updates → Check now* forces one |
+| OPML export fails | with the systemd unit only `~/Downloads`, `~/Documents` and `~/Desktop` are writable; other paths fall back to `~/.local/share/knews-curator/exports/` |
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `~/.local/share/knews-curator/app/knewsd` | installed daemon code |
-| `~/.local/share/knews-curator/curator.db` | SQLite database (feeds, items, prefs) |
-| `~/.cache/knews-curator/images` | image cache |
-| `~/.config/systemd/user/knewsd.service` | user unit |
 | `~/.local/share/plasma/plasmoids/io.github.infidel.newscurator` | installed applet |
-| `dist/` | local build output (`build.sh`), not tracked |
+| `~/.local/share/knews-curator/curator.db` | SQLite database: feeds, items, preferences |
+| `~/.local/share/knews-curator/app/` | installed backend code |
+| `~/.local/share/knews-curator/knewsd.lock` | single-instance lock |
+| `~/.cache/knews-curator/images` | image cache |
+| `~/.cache/knews-curator/knewsd.log` | backend output |
+| `$XDG_RUNTIME_DIR/knews-curator/` | socket, `endpoint.json`, session scratch |
+| `~/.config/systemd/user/knewsd.service` | user unit, only with `install.sh --systemd` |
 
-## Notes and limits
+## Uninstall
 
-- Extraction is heuristic. Paywalled or JS-only pages fall back to the feed's own summary
-  content and the reader says so ("Partial extraction"); the browser button is always there.
-- Mark-all-read asks for confirmation in a dialog, then keeps an *Undo* in the notice banner for
-  9 seconds; the undo only restores what that action changed.
-- The applet keeps the last 300 items per feed (`max_items_per_feed`).
-- The systemd unit runs with `ProtectHome=read-only`; `~/Downloads`, `~/Documents` and
-  `~/Desktop` are writable for OPML exports, anything else falls back to the app data folder.
-- The port is not a fixed constant any more: socket mode publishes an ephemeral loopback port
-  per daemon start, and the *port* mode uses the configured `8770` (editable in Settings →
-  Backend). Scripts that need `http://127.0.0.1:8770` must either select the port mode or read
-  `endpoint.json`.
-  To change it, edit `contents/config/main.xml`'s default or `Plasmoid.configuration.port`,
-  then restart the unit:
-  `systemctl --user restart knewsd`.
+```bash
+./uninstall.sh          # applet, icons, backend copy, unit, runtime files
+./uninstall.sh --purge  # also delete the database and the image cache
+```
+
+Removing the applet from the GUI deletes the package only. The widget stops its backend on
+destruction, and the idle exit covers the rest.
+
+## Limits
+
+- Article extraction is heuristic. Paywalled or JavaScript-only pages fall back to the summary in
+  the feed, and the reader labels that case.
+- The database keeps the newest 300 items per feed.
+- Feed discovery reads the page the address points at. Feeds announced only in client-side
+  JavaScript stay invisible.
+- The update check sends one request per day to `api.github.com`. Unauthenticated GitHub allows
+  60 requests per hour per IP, so a shared address can hit the limit; the check then waits for the
+  next day.
+- An icon that the site does not publish cannot be reconstructed.
+
+## Documentation
+
+| Document | Audience |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the backend lives, talks and fails |
+| [docs/API.md](docs/API.md) | HTTP API reference |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, test, CI, release |
 
 ## License
 
-MIT — see `LICENSE`.
+MIT. See [LICENSE](LICENSE).

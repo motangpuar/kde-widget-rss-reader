@@ -108,7 +108,7 @@ PY
 STAGE="$DIST/stage"
 ROOT="$STAGE/news-curator-$VERSION"
 mkdir -p "$ROOT"
-for item in plasmoid backend systemd icons install.sh uninstall.sh dev-reload.sh build.sh \
+for item in plasmoid backend systemd icons docs install.sh uninstall.sh dev-reload.sh build.sh \
             README.md LICENSE; do
     [ -e "$PROJECT_DIR/$item" ] || die "missing $item"
     cp -r "$PROJECT_DIR/$item" "$ROOT/"

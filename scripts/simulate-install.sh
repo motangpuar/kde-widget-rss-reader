@@ -2,7 +2,7 @@
 # Simulate a user installing News Curator from a GitHub release, without publishing one.
 #
 # Serves the locally built artifacts on a throwaway HTTP server laid out exactly like the
-# release download path (/releases/download/<tag>/<asset>) and then runs the README commands
+# release download path (/releases/download/<tag>/<asset>) and then runs the documented install
 # against it with the real `curl`, the real `tar` and the real `./install.sh`.
 #
 #   ./scripts/simulate-install.sh                 # build, download, verify, install
@@ -65,7 +65,7 @@ done
 curl -fsS -o /dev/null "$BASE/SHA256SUMS" || { echo "error: mirror did not start" >&2; exit 1; }
 printf '  %s/<asset>\n' "$BASE"
 
-step "download with curl (the README command, different host only)"
+step "download with curl (the documented command, different host only)"
 cd "$DL"
 curl -fsSLO "$BASE/news-curator-$VERSION.tar.gz"
 curl -fsSLO "$BASE/$PLASMOID_ID-$VERSION.plasmoid"
@@ -74,7 +74,7 @@ ls -l | sed 's/^/  /'
 # SHA256SUMS is generated with ./ prefixes, so verify it in place.
 sha256sum -c SHA256SUMS | sed 's/^/  /'
 
-step "extract and install (the README command)"
+step "extract and install (the documented command)"
 tar -xzf "news-curator-$VERSION.tar.gz"
 [ -d "news-curator-$VERSION" ] || { echo "error: tarball root is wrong" >&2; exit 1; }
 printf '  unpacked news-curator-%s/\n' "$VERSION"
