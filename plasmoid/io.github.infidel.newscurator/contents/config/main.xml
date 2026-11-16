@@ -24,5 +24,21 @@
     <entry name="socketPath" type="String">
       <default></default>
     </entry>
+    <!-- Update check: one GitHub API request per day, opt-out, never installs anything. -->
+    <entry name="updateCheck" type="Bool">
+      <default>true</default>
+    </entry>
+    <!-- Unix seconds of the last successful check, so the throttle survives a plasmashell restart. -->
+    <entry name="updateCheckedAt" type="Int">
+      <default>0</default>
+    </entry>
+    <!-- Last version the check saw as newer, so the strip survives a plasmashell restart. -->
+    <entry name="availableVersion" type="String">
+      <default></default>
+    </entry>
+    <!-- Version the user asked not to be told about again. -->
+    <entry name="skippedVersion" type="String">
+      <default></default>
+    </entry>
   </group>
 </kcfg>

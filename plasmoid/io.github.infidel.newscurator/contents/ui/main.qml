@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents3
+import org.kde.plasma.plasma5support as P5Support
 import "Api.js" as Api
 
 PlasmoidItem {
@@ -67,6 +68,29 @@ PlasmoidItem {
     property int currentItemId: 0
     property bool readerOpen: false
     property bool backendUp: false
+    // The widget is the supervisor, not a one-shot launcher: when a load fails it re-arms itself
+    // with exponential backoff until the daemon answers again. "Stop backend" is sticky until the
+    // user starts it again, so the supervisor never fights an explicit decision.
+    property bool backendStoppedByUser: false
+    // Was the backend ever healthy in this widget instance? Distinguishes "still starting" from
+    // "died under a running widget", which is what the status strip reports.
+    property bool backendEverUp: false
+    // Newer release, if the (opt-in, 24 h throttled) update check found one.
+    property string updateVersion: ""
+    property string updateUrl: ""
+    property bool updateNotified: false
+    property bool iconsRunning: false
+    property int iconsDone: 0
+    property int iconsTotal: 0
+    // Release details dialog. Notes are fetched on demand: the strip must not wait for the API.
+    property bool updateDialogOpen: false
+    property string updateNotes: ""
+    property string updatePublished: ""
+    property bool updateNotesLoading: false
+    property string updateNotesError: ""
+    property int supervisorAttempts: 0
+    readonly property int supervisorInterval: Math.min(60000,
+                                                      5000 * Math.pow(2, Math.min(supervisorAttempts, 4)))
     property string statusMessage: ""
     property string notice: ""
     // Set while a mark-all sweep can still be undone from the notice banner.
@@ -107,6 +131,8 @@ PlasmoidItem {
         // A store install has no installer: the widget starts the backend it ships. The script
         // answers /api/health first, so this is a no-op when a daemon already runs.
         backendLauncher.start()
+        restoreUpdate()
+        updateTimer.start()
     }
 
     // The widget is the supervisor: when it goes away, so does the daemon it started.
@@ -114,7 +140,184 @@ PlasmoidItem {
     // daemon also reaps itself after KNEWS_IDLE_EXIT seconds without a request.
     Component.onDestruction: backendLauncher.stop()
 
+    // ------------------------------------------------------------- update check
+    // Opt-in, one request per 24 h, and it must never surface an error: offline, rate limited or
+    // parsing garbage all mean "say nothing". The widget never installs anything; the update
+    // button opens the release page.
+    readonly property string installedVersion: {
+        var meta = Plasmoid.metaData
+        return (meta && meta.version) ? String(meta.version) : ""
+    }
+
+    function versionParts(text) {
+        var parts = String(text).replace(/^v/, "").split(/[.+-]/)
+        var out = []
+        for (var i = 0; i < 3; i++)
+            out.push(parseInt(parts[i] || "0", 10) || 0)
+        return out
+    }
+
+    function versionNewer(candidate, current) {
+        var a = versionParts(candidate)
+        var b = versionParts(current)
+        for (var i = 0; i < 3; i++) {
+            if (a[i] > b[i])
+                return true
+            if (a[i] < b[i])
+                return false
+        }
+        return false
+    }
+
+    function releaseUrl(version) {
+        return "https://github.com/motangpuar/kde-widget-rss-reader/releases/tag/v" + version
+    }
+
+    // The check result is persisted: a found update must not disappear when plasmashell restarts,
+    // and the 24 h throttle means the next check may be a day away.
+    function restoreUpdate() {
+        var known = Plasmoid.configuration.availableVersion || ""
+        if (known.length === 0 || known === Plasmoid.configuration.skippedVersion
+                || !versionNewer(known, installedVersion))
+            return
+        updateVersion = known
+        updateUrl = releaseUrl(known)
+        console.info("newscurator update: showing", known, "installed", installedVersion)
+    }
+
+    function setUpdateState(version) {
+        updateVersion = version
+        Plasmoid.configuration.availableVersion = version
+        updateUrl = version.length > 0 ? releaseUrl(version) : ""
+    }
+
+    function checkForUpdate(force) {
+        if (!Plasmoid.configuration.updateCheck || installedVersion.length === 0)
+            return
+        var now = Math.floor(Date.now() / 1000)
+        if (!force && now - (Plasmoid.configuration.updateCheckedAt || 0) < 86400)
+            return
+        var xhr = new XMLHttpRequest()
+        // No custom headers: the widget does not need them and they would only add preflight noise.
+        xhr.open("GET", "https://api.github.com/repos/motangpuar/kde-widget-rss-reader/releases/latest")
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return
+            if (xhr.status !== 200)
+                return
+            var data = null
+            try {
+                data = JSON.parse(xhr.responseText)
+            } catch (err) {
+                return
+            }
+            var latest = String(data.tag_name || "").replace(/^v/, "")
+            if (latest.length === 0)
+                return
+            // One greppable line: "ran but nothing appeared" is otherwise invisible in the journal.
+            console.info("newscurator update check: latest", latest, "installed", installedVersion)
+            Plasmoid.configuration.updateCheckedAt = now
+            if (latest === Plasmoid.configuration.skippedVersion
+                    || !versionNewer(latest, installedVersion)) {
+                setUpdateState("")
+                return
+            }
+            setUpdateState(latest)
+            updateUrl = String(data.html_url || releaseUrl(latest))
+            announceUpdate()
+        }
+        xhr.send()
+    }
+
+    // One desktop notification per widget load, and only when notify-send exists: the store has no
+    // notification API for applets, and a missing helper must not turn into an error message.
+    function announceUpdate() {
+        if (updateNotified || updateVersion.length === 0)
+            return
+        updateNotified = true
+        var title = shellQuote(i18n("News Curator %1 is available", updateVersion))
+        var body = shellQuote(i18n("Open Settings in the widget to update, or press Update in the list."))
+        var script = "command -v notify-send >/dev/null 2>&1 || exit 0; "
+            + "exec notify-send -a \"News Curator\" -i newscurator -- " + title + " " + body
+        notifyDataSource.connectSource("sh -c " + shellQuote(script))
+    }
+
+    function shellQuote(text) {
+        return "'" + String(text).replace(/'/g, "'\\''") + "'"
+    }
+
+    function skipUpdate() {
+        if (updateVersion.length > 0)
+            Plasmoid.configuration.skippedVersion = updateVersion
+        setUpdateState("")
+    }
+
+    function showUpdate() {
+        if (updateVersion.length === 0)
+            return
+        updateDialogOpen = true
+        if (updateNotes.length > 0 || updateNotesLoading)
+            return
+        fetchReleaseNotes(updateVersion)
+    }
+
+    function fetchReleaseNotes(version) {
+        updateNotesLoading = true
+        updateNotesError = ""
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", "https://api.github.com/repos/motangpuar/kde-widget-rss-reader/releases/tags/v"
+                        + version)
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return
+            updateNotesLoading = false
+            if (xhr.status !== 200) {
+                updateNotesError = i18n("Could not load the release notes.")
+                return
+            }
+            var data = null
+            try {
+                data = JSON.parse(xhr.responseText)
+            } catch (err) {
+                updateNotesError = i18n("Could not load the release notes.")
+                return
+            }
+            updateNotes = String(data.body || "")
+            updatePublished = String(data.published_at || "")
+            if (data.html_url)
+                updateUrl = String(data.html_url)
+        }
+        xhr.send()
+    }
+
+    // Qt.openUrlExternally can report false in a bare plasmoid session; xdg-open is the fallback.
+    function openUpdate() {
+        var target = updateUrl.length > 0 ? updateUrl : releaseUrl(updateVersion)
+        if (target.length === 0)
+            return
+        if (Qt.openUrlExternally(target))
+            return
+        notifyDataSource.connectSource("xdg-open " + shellQuote(target))
+    }
+
+    // ------------------------------------------------------------ icons
+    function refreshIcons() {
+        if (!backendUp)
+            return
+        Api.request("POST", "/api/icons/refresh", {}, function (status, data) {
+            if (status !== 200) {
+                showNotice(i18n("Could not start the icon refresh"))
+                return
+            }
+            iconsRunning = true
+            showNotice(i18n("Redownloading source icons…"))
+            iconsPollTimer.restart()
+        })
+    }
+
     function setBackendConnection(mode, port, socketPath) {
+        backendStoppedByUser = false
+        supervisorAttempts = 0
         Plasmoid.configuration.connection = mode === "socket" ? 1 : 0
         if (port > 0)
             Plasmoid.configuration.port = port
@@ -125,11 +328,14 @@ PlasmoidItem {
 
     function backendAction(action) {
         if (action === "stop") {
+            backendStoppedByUser = true
             backendLauncher.stop()
             backendUp = false
             statusMessage = i18n("Backend stopped. It starts again when this widget reloads.")
             return
         }
+        backendStoppedByUser = false
+        supervisorAttempts = 0
         statusMessage = i18n("Restarting the feed backend…")
         backendLauncher.restart()
     }
@@ -154,15 +360,95 @@ PlasmoidItem {
                 backendRetry.restart()
                 root.loadState()
             } else if (state === "no-python") {
+                root.backendStoppedByUser = true
                 statusMessage = i18n("Python 3 is required for the feed backend. "
                                      + "Install python3, then reopen this widget.")
             } else if (state === "missing") {
+                root.backendStoppedByUser = true
                 statusMessage = i18n("This package has no bundled backend — "
                                      + "install the full release instead.")
             } else {
                 statusMessage = i18n("Could not start the feed backend. "
                                      + "See ~/.cache/knews-curator/knewsd.log")
             }
+        }
+    }
+
+    // Silent death (OOM kill, session teardown, a crash) used to leave the widget offline until
+    // the next plasmashell load: the retry poll below is only armed after a successful spawn.
+    // This timer is the supervisor. bootstrap.sh answers /api/health first, so calling start()
+    // again is a cheap no-op when a daemon is already up.
+    Timer {
+        id: backendSupervisor
+        interval: root.supervisorInterval
+        repeat: true
+        running: !root.backendUp && !root.backendStoppedByUser
+        onTriggered: {
+            if (backendLauncher.busy)
+                return
+            root.supervisorAttempts = Math.min(root.supervisorAttempts + 1, 8)
+            root.statusMessage = root.supervisorAttempts > 1
+                ? i18n("Backend offline — retrying (attempt %1).", root.supervisorAttempts)
+                : i18n("Backend offline — restarting it.")
+            backendLauncher.start()
+        }
+    }
+
+    // Polls /api/state while the icon repair runs, then reloads so the new favicons are used.
+    Timer {
+        id: iconsPollTimer
+        interval: 1500
+        repeat: true
+        onTriggered: {
+            Api.request("GET", "/api/state", null, function (status, data) {
+                if (status !== 200 || !data) {
+                    iconsPollTimer.stop()
+                    iconsRunning = false
+                    return
+                }
+                var icons = data.icons || {}
+                root.iconsDone = icons.done || 0
+                root.iconsTotal = icons.total || 0
+                iconsRunning = !!icons.running
+                if (!iconsRunning) {
+                    iconsPollTimer.stop()
+                    root.loadState()
+                    showNotice(i18n("Source icons refreshed"))
+                }
+            })
+        }
+    }
+
+    // First check ~20 s after load (never in the middle of the startup repaint), then the
+    // throttle inside checkForUpdate() decides.
+    Timer {
+        id: updateTimer
+        interval: 20000
+        onTriggered: root.checkForUpdate(false)
+    }
+
+    P5Support.DataSource {
+        id: notifyDataSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            notifyDataSource.disconnectSource(sourceName)
+        }
+    }
+
+    // Detection, not recovery: the 60 s sync is too slow to notice an OOM kill, and the supervisor
+    // below only arms once backendUp is false. One local health call every 15 s costs nothing and
+    // keeps worst-case recovery under 20 s (detect <= 15 s + first backoff 5 s).
+    Timer {
+        id: backendHealth
+        interval: 15000
+        repeat: true
+        running: root.backendUp
+        onTriggered: {
+            Api.request("GET", "/api/health", null, function (status, data) {
+                if (status !== 200 || !data || !data.ok)
+                    root.fail(status)
+            })
         }
     }
 
@@ -233,7 +519,9 @@ PlasmoidItem {
             stateLoading = false
             if (status === 200 && data) {
                 backendUp = true
+                backendEverUp = true
                 statusMessage = ""
+                supervisorAttempts = 0
                 backendRetry.stop()
                 feeds = data.feeds || []
                 folders = data.folders || []
@@ -706,6 +994,9 @@ PlasmoidItem {
                 refreshRunning: root.refreshRunning
                 searchText: root.searchText
                 backendUp: root.backendUp
+                backendEverUp: root.backendEverUp
+                backendStopped: root.backendStoppedByUser
+                updateVersion: root.updateVersion
                 statusMessage: root.statusMessage
                 selectionTitle: root.selectedTitle()
                 thumbBase: root.channelPort > 0
@@ -732,6 +1023,9 @@ PlasmoidItem {
                 onAddFeedRequested: { root.addFeedFolder = ""; root.addFeedOpen = true }
                 onSettingsRequested: root.settingsOpen = true
                 onLoadMoreRequested: root.loadMore()
+                onRestartRequested: root.backendAction("restart")
+                onUpdateRequested: root.showUpdate()
+                onUpdateSkipRequested: root.skipUpdate()
             }
 
             ReaderView {
@@ -772,6 +1066,24 @@ PlasmoidItem {
             onCancelled: root.addFeedOpen = false
         }
 
+        UpdateDialog {
+            anchors.fill: parent
+            visible: root.updateDialogOpen
+            installedVersion: root.installedVersion
+            version: root.updateVersion
+            notes: root.updateNotes
+            publishedAt: root.updatePublished
+            url: root.updateUrl
+            loading: root.updateNotesLoading
+            errorText: root.updateNotesError
+            onOpenRequested: root.openUpdate()
+            onSkipRequested: {
+                root.skipUpdate()
+                root.updateDialogOpen = false
+            }
+            onDismissed: root.updateDialogOpen = false
+        }
+
         SettingsSheet {
             anchors.fill: parent
             visible: root.settingsOpen
@@ -783,6 +1095,27 @@ PlasmoidItem {
             backendPort: root.configuredPort
             socketPath: root.configuredSocket
             backendEndpoint: root.backendEndpointText
+            updateCheckEnabled: Plasmoid.configuration.updateCheck
+            installedVersion: root.installedVersion
+            updateVersion: root.updateVersion
+            skippedVersion: Plasmoid.configuration.skippedVersion || ""
+            onUpdateCheckToggled: (enabled) => {
+                Plasmoid.configuration.updateCheck = enabled
+                if (enabled)
+                    root.checkForUpdate(true)
+                else
+                    root.updateVersion = ""
+            }
+            onUpdateCheckRequested: root.checkForUpdate(true)
+            onUpdateDetailsRequested: root.showUpdate()
+            iconsRunning: root.iconsRunning
+            iconsDone: root.iconsDone
+            iconsTotal: root.iconsTotal
+            onIconsRefreshRequested: root.refreshIcons()
+            onUpdateSkipCleared: {
+                Plasmoid.configuration.skippedVersion = ""
+                root.checkForUpdate(true)
+            }
             onClosed: root.settingsOpen = false
             onBackendSettingsChanged: (mode, port, path) => root.setBackendConnection(mode, port, path)
             onBackendActionRequested: (action) => root.backendAction(action)

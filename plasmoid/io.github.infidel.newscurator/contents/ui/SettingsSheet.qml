@@ -14,6 +14,13 @@ Item {
     property bool backendUp: false
     property string exportDir: ""
     // Backend connection, mirrored from KConfig by main.qml.
+    property bool updateCheckEnabled: true
+    property string installedVersion: ""
+    property string updateVersion: ""
+    property string skippedVersion: ""
+    property bool iconsRunning: false
+    property int iconsDone: 0
+    property int iconsTotal: 0
     property string connectionMode: "socket"
     property int backendPort: 8770
     property string socketPath: ""
@@ -26,6 +33,11 @@ Item {
     signal prefChanged(string key, var value)
     signal prefsPatched(var values)
     signal refreshNowRequested()
+    signal updateCheckToggled(bool enabled)
+    signal updateCheckRequested()
+    signal updateDetailsRequested()
+    signal iconsRefreshRequested()
+    signal updateSkipCleared()
     signal importOpml(string text)
     signal feedsAdded(int added, int failed)
     signal subscriptionsChanged()
@@ -1013,6 +1025,27 @@ Item {
                             Item { Layout.fillWidth: true }
                         }
 
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            PlasmaComponents3.Button {
+                                text: i18n("Refresh source icons")
+                                icon.name: "image-x-generic"
+                                enabled: sheet.backendUp && !sheet.iconsRunning
+                                onClicked: sheet.iconsRefreshRequested()
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: sheet.iconsRunning
+                                      ? i18n("Redownloading icons… %1 of %2",
+                                             sheet.iconsDone, sheet.iconsTotal)
+                                      : i18n("Fixes a wrong or missing favicon in the list.")
+                                color: Kirigami.Theme.disabledTextColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.68)
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
                         Text {
                             Layout.fillWidth: true
                             text: sheet.backendEndpoint
@@ -1030,6 +1063,104 @@ Item {
                             color: Kirigami.Theme.disabledTextColor
                             font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.68)
                             wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    // ------------------------------------------------------- updates
+                    // KCM form conventions: label on the left, control on the right, descriptions in
+                    // disabled colour underneath. A boolean is a Switch, not a checkbox in a row of
+                    // buttons, so the state is readable without reading the text twice.
+                    Section {
+                        title: i18n("Updates")
+                        summary: i18n("checks daily, installs nothing")
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Text {
+                                Layout.fillWidth: true
+                                text: i18n("Check for new versions")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            PlasmaComponents3.Switch {
+                                checked: sheet.updateCheckEnabled
+                                enabled: true
+                                onToggled: sheet.updateCheckToggled(checked)
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: i18n("One request per day to GitHub. The widget never downloads "
+                                       + "or installs anything — it links to the release page.")
+                            color: Kirigami.Theme.disabledTextColor
+                            font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.68)
+                            wrapMode: Text.WordWrap
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Text {
+                                Layout.fillWidth: true
+                                text: i18n("Installed version")
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            Text {
+                                text: sheet.installedVersion
+                                color: Kirigami.Theme.disabledTextColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: sheet.updateVersion.length > 0
+                            spacing: Kirigami.Units.smallSpacing
+                            Kirigami.Icon {
+                                source: "cloud-download"
+                                implicitWidth: Math.round(Kirigami.Units.gridUnit * 0.85)
+                                implicitHeight: implicitWidth
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: i18n("Version %1 is available", sheet.updateVersion)
+                                color: Kirigami.Theme.textColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.76)
+                            }
+                            PlasmaComponents3.Button {
+                                text: i18n("Details…")
+                                onClicked: sheet.updateDetailsRequested()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: sheet.skippedVersion.length > 0
+                            spacing: Kirigami.Units.smallSpacing
+                            Text {
+                                Layout.fillWidth: true
+                                text: i18n("Skipping version %1", sheet.skippedVersion)
+                                color: Kirigami.Theme.disabledTextColor
+                                font.pixelSize: Math.round(Kirigami.Units.gridUnit * 0.72)
+                            }
+                            PlasmaComponents3.Button {
+                                text: i18n("Reset")
+                                onClicked: sheet.updateSkipCleared()
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Item { Layout.fillWidth: true }
+                            PlasmaComponents3.Button {
+                                text: i18n("Check now")
+                                icon.name: "view-refresh"
+                                enabled: sheet.updateCheckEnabled
+                                onClicked: sheet.updateCheckRequested()
+                            }
                         }
                     }
                 }

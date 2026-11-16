@@ -44,7 +44,15 @@ Item {
         return "'" + String(text).replace(/'/g, "'\\''") + "'"
     }
 
+    // The daemon we are attached to may not be the one this widget would start: an opt-in
+    // systemd unit (or a manual `--port` run) publishes a port endpoint while the widget's own
+    // default is the socket. Restart in the transport that is actually serving us, otherwise the
+    // supervisor spawns a second daemon beside the unit while it restarts.
+    readonly property bool attachedToPort: activeTransport === "port" && activePort > 0
+
     function endpointArgs() {
+        if (attachedToPort)
+            return " --port " + activePort
         if (connectionMode === "socket")
             return socketPath.length > 0 ? " --socket " + quote(socketPath) : " --socket ''"
         return " --port " + port
