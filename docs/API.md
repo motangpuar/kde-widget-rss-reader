@@ -24,7 +24,7 @@ cat "$XDG_RUNTIME_DIR/knews-curator/endpoint.json"
 ## Reading
 
 ```
-GET  /api/health              {"ok": true, "version": "1.9.1", "pid": 1234, "transport": "socket",
+GET  /api/health              {"ok": true, "version": "1.10.0", "pid": 1234, "transport": "socket",
                                "port": 39117, "socket": "/run/user/1000/...", "url": "...",
                                "idle_exit": 900, "started": 1794852065}
 GET  /api/state               feeds, folders, counts, prefs, refresh, icons, export_dir, version

@@ -262,6 +262,13 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   +3 h jump and the resume refresh) and a `test-bootstrap.sh` runtime-wipe case; 58 tests green.
   Lesson: `test-bootstrap.sh` now rebuilds the zipapp when sources are newer — it had been
   testing a stale artifact and hid the lock change.
+- 2026-11-17 1.10.0 prepared: five commits squashed by concern (backend lifetime, favicons, UI,
+  packaging, docs), version bumped in both homes (metadata.json + config.py, plus the `/api/health`
+  example in docs/API.md), and `CHANGELOG.md` added. `scripts/release-notes.sh <version>` extracts
+  the section for the GitHub release body (workflow falls back to `--generate-notes` when the
+  section is missing), `ci-local.sh` fails when the current version has no section, and the tarball
+  ships and requires `CHANGELOG.md`. Minor bump, not a patch: the series adds endpoints, config
+  keys and UI surfaces.
 - 2026-11-12 **1.9.0 released** (`v1.9.0` = `83364b4`, fast-forward merge of
   `fix/backend-lifetime` into `main`, 4 commits, 22 files, +1725/-259). CI and Release green in
   36 s / 39 s; assets `io.github.infidel.newscurator-1.9.0.plasmoid` 70 393 B,
