@@ -240,30 +240,73 @@ if HEALTH=$(probe 2>/dev/null); then
     fi
 fi
 
-if [ "$MODE" = socket ]; then
-    printf 'bootstrap: starting backend on unix socket %s (loopback port auto)\n' "$SOCKET"
-    printf '=== %s start socket=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$SOCKET" >> "$LOG"
-    PYTHONDONTWRITEBYTECODE=1 setsid python3 "$APP" --socket "$SOCKET" --idle-exit "$IDLE" \
-        >> "$LOG" 2>&1 < /dev/null &
-else
-    printf 'bootstrap: starting backend on port %s\n' "$PORT"
-    printf '=== %s start port=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$PORT" >> "$LOG"
-    PYTHONDONTWRITEBYTECODE=1 setsid python3 "$APP" --port "$PORT" --idle-exit "$IDLE" \
-        >> "$LOG" 2>&1 < /dev/null &
+# The data-dir lock file carries the pid of the daemon that holds it. A daemon can be alive,
+# hold the lock, and still answer nothing (a wedged request handler, a half-dead process); it then
+# blocks every replacement while being useless to the widget.
+stuck_daemon_pid() {
+    lockfile="$DATA/knewsd.lock"
+    [ -r "$lockfile" ] || return 1
+    pid=$(tr -cd '0-9' < "$lockfile" 2>/dev/null || true)
+    [ -n "$pid" ] || return 1
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$APP" || return 1
+    printf '%s\n' "$pid"
+}
+
+launch() {
+    if [ "$MODE" = socket ]; then
+        printf 'bootstrap: starting backend on unix socket %s (loopback port auto)\n' "$SOCKET"
+        printf '=== %s start socket=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$SOCKET" >> "$LOG"
+        PYTHONDONTWRITEBYTECODE=1 setsid python3 "$APP" --socket "$SOCKET" --idle-exit "$IDLE" \
+            >> "$LOG" 2>&1 < /dev/null &
+    else
+        printf 'bootstrap: starting backend on port %s\n' "$PORT"
+        printf '=== %s start port=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$PORT" >> "$LOG"
+        PYTHONDONTWRITEBYTECODE=1 setsid python3 "$APP" --port "$PORT" --idle-exit "$IDLE" \
+            >> "$LOG" 2>&1 < /dev/null &
+    fi
+}
+
+# Wait for a daemon of the wanted version on the requested endpoint; 0 when it answered.
+await_health() {
+    tries=$1
+    i=0
+    while [ "$i" -lt "$tries" ]; do
+        if HEALTH=$(probe 2>/dev/null); then
+            if [ "$(json_field "$HEALTH" version)" = "${WANT:-?}" ]; then
+                return 0
+            fi
+        fi
+        i=$((i + 1))
+        sleep 0.25
+    done
+    return 1
+}
+
+launch
+if await_health 60; then
+    report_endpoint "$HEALTH"
+    printf 'BOOTSTRAP_STARTED %s\n' "$(json_field "$HEALTH" pid)"
+    exit 0
 fi
 
-i=0
-while [ "$i" -lt 60 ]; do
-    if HEALTH=$(probe 2>/dev/null); then
-        if [ "$(json_field "$HEALTH" version)" = "${WANT:-?}" ]; then
-            report_endpoint "$HEALTH"
-            printf 'BOOTSTRAP_STARTED %s\n' "$(json_field "$HEALTH" pid)"
-            exit 0
-        fi
+# One bounded recovery: replace a daemon that holds the lock but answers nothing.
+if STUCK=$(stuck_daemon_pid); then
+    printf 'bootstrap: daemon %s holds the lock but does not answer, replacing it\n' "$STUCK" >&2
+    kill -TERM "$STUCK" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 20 ] && kill -0 "$STUCK" 2>/dev/null; do
+        i=$((i + 1))
+        sleep 0.25
+    done
+    kill -KILL "$STUCK" 2>/dev/null || true
+    launch
+    if await_health 40; then
+        report_endpoint "$HEALTH"
+        printf 'BOOTSTRAP_STARTED %s\n' "$(json_field "$HEALTH" pid)"
+        exit 0
     fi
-    i=$((i + 1))
-    sleep 0.25
-done
+fi
 
 printf 'bootstrap: backend did not answer, see %s\n' "$LOG" >&2
 printf 'BOOTSTRAP_FAILED\n'

@@ -85,4 +85,11 @@ def endpoint_path() -> Path:
     return runtime_dir() / "endpoint.json"
 
 def lock_path() -> Path:
-    return runtime_dir() / "knewsd.lock"
+    """Lock file that proves single instance, one per user.
+
+    Deliberately in the **data** dir: the runtime dir is per session and is removed on logout,
+    which deletes the lock's inode while a surviving daemon still holds it. The next daemon then
+    takes a *new* inode's lock without contention and both processes serve the same database.
+    The data dir outlives sessions, so the lock keeps its meaning.
+    """
+    return data_dir() / "knewsd.lock"

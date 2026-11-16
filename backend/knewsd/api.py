@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from . import config
@@ -220,9 +220,15 @@ class Runtime:
     properties of the process, not of one socket.
     """
 
-    def __init__(self, idle_exit: int = DEFAULT_IDLE_EXIT) -> None:
+    def __init__(self, idle_exit: int = DEFAULT_IDLE_EXIT,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        # ``started`` is wall clock (a human reads it in /api/health); idleness is measured on
+        # ``clock``, which defaults to CLOCK_MONOTONIC. CLOCK_REALTIME keeps advancing while the
+        # machine is suspended and jumps on NTP steps, so a laptop that slept for three hours
+        # looked idle for three hours and the reaper killed a daemon whose client was on screen.
         self.started = time.time()
-        self.last_request = time.time()
+        self.clock = clock
+        self.last_request = self.clock()
         self.idle_exit = max(0, int(idle_exit))
         self.transport = "port"
         self.port = 0
@@ -231,10 +237,11 @@ class Runtime:
         self.stopped = threading.Event()
 
     def touch(self) -> None:
-        self.last_request = time.time()
+        self.last_request = self.clock()
 
     def idle_for(self) -> float:
-        return time.time() - self.last_request
+        """Seconds of *running* time without a request; suspend time does not count."""
+        return max(0.0, self.clock() - self.last_request)
 
     def endpoint(self) -> dict[str, Any]:
         return {
@@ -248,6 +255,17 @@ class Runtime:
             "idle_exit": self.idle_exit,
             "started": int(self.started),
         }
+
+    def published_identity(self) -> bool:
+        """True while ``endpoint.json`` still describes this process."""
+        try:
+            data = json.loads(config.endpoint_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        try:
+            return int(data.get("pid") or -1) == os.getpid()
+        except (TypeError, ValueError):
+            return False
 
     def publish(self) -> None:
         """Publish the endpoint so clients (and the widget) can find this process."""
@@ -292,8 +310,14 @@ class IdleWatchdog(threading.Thread):
 
     def run(self) -> None:
         interval = 2.0 if self.runtime.idle_exit <= 30 else 5.0
-        while not self.runtime.stopped.is_set():
-            time.sleep(interval)
+        while not self.runtime.stopped.wait(interval):
+            if not self.runtime.published_identity():
+                # The runtime directory was removed under us (session teardown, logind cleanup):
+                # our listener is unreachable and no client can ever find us again. Exit instead
+                # of lingering as an orphan that still refreshes the database.
+                print("knewsd: published endpoint disappeared, exiting", flush=True)
+                self.runtime.stop()
+                return
             idle = self.runtime.idle_for()
             if idle >= self.runtime.idle_exit:
                 print(f"knewsd: idle for {idle:.0f}s (limit {self.runtime.idle_exit}s), exiting",
@@ -322,10 +346,31 @@ class Handler(BaseHTTPRequestHandler):
     runtime: Runtime  # type: ignore[assignment]
 
     # -------------------------------------------------------------- plumbing
+    def address_string(self) -> str:
+        """Peer label for the access log.
+
+        ``BaseHTTPRequestHandler.address_string`` reads ``client_address[0]``, which raises
+        IndexError for an AF_UNIX peer (the address is empty). An exception in logging must never
+        break a request, so this returns a stable label instead.
+        """
+        if getattr(self.connection, "family", None) == socket.AF_UNIX:
+            return "unix"
+        address = getattr(self, "client_address", "")
+        if isinstance(address, str):
+            return address or "unknown"
+        try:
+            return str(address[0])
+        except (IndexError, TypeError):
+            return "unknown"
+
     def log_message(self, fmt: str, *args: Any) -> None:  # quieter logs
-        if ACCESS_LOG:
+        if not ACCESS_LOG:
+            return
+        try:
             sys.stderr.write("request %s - %s\n" % (self.address_string(), fmt % args))
             sys.stderr.flush()
+        except Exception:  # noqa: BLE001 - logging must never take a request down
+            pass
 
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").split(":")[0]
@@ -594,24 +639,59 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class AutoRefresher(threading.Thread):
-    def __init__(self, store: Store, manager: RefreshManager) -> None:
-        super().__init__(daemon=True)
+    """Background refresh on the configured interval.
+
+    Due-ness is stored as wall clock (``feeds.last_fetch``), but wall clock moves without time
+    passing — suspend, resume, NTP steps. A three hour sleep would therefore make every feed look
+    overdue and fire a full refresh burst on resume. The loop tracks the drift between the
+    monotonic clock and the wall clock and folds it into ``_skew``, so only elapsed *running*
+    time counts.
+    """
+
+    JUMP_TOLERANCE = 60.0  # seconds of unexplained wall-clock drift that count as a jump
+
+    def __init__(self, store: Store, manager: RefreshManager,
+                 clock: Callable[[], float] = time.monotonic,
+                 wall: Callable[[], float] = time.time,
+                 stop: threading.Event | None = None) -> None:
+        super().__init__(daemon=True, name="knewsd-refresh")
         self.store = store
         self.manager = manager
+        self.clock = clock
+        self.wall = wall
+        self._stop = stop or threading.Event()
+        self._mono = clock()
+        self._wall = wall()
+        self._skew = 0.0
+
+    def _observe_clock(self) -> None:
+        mono, wall = self.clock(), self.wall()
+        drift = (wall - self._wall) - (mono - self._mono)
+        if abs(drift) > self.JUMP_TOLERANCE:
+            self._skew += drift
+        self._mono, self._wall = mono, wall
+
+    def due(self, feeds: list[dict[str, Any]], minutes: int) -> list[dict[str, Any]]:
+        now = self.wall() - self._skew
+        return [f for f in feeds if now - float(f["last_fetch"] or 0) >= minutes * 60]
+
+    def poll(self) -> None:
+        self._observe_clock()
+        minutes = int(self.store.prefs().get("refresh_minutes", 30) or 0)
+        if minutes <= 0 or self.manager.state["running"]:
+            return
+        due = self.due(self.store.feeds(enabled_only=True), minutes)
+        if due:
+            self.manager.start(feeds=due)
 
     def run(self) -> None:
         while True:
-            time.sleep(30)
             try:
-                minutes = int(self.store.prefs().get("refresh_minutes", 30) or 0)
-                if minutes <= 0 or self.manager.state["running"]:
-                    continue
-                feeds = self.store.feeds(enabled_only=True)
-                due = [f for f in feeds if time.time() - float(f["last_fetch"] or 0) >= minutes * 60]
-                if due:
-                    self.manager.start(feeds=due)
+                self.poll()
             except Exception:  # noqa: BLE001 - never let the loop die
-                continue
+                pass
+            if self._stop.wait(30.0):
+                return
 
 
 def build_server(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
@@ -665,7 +745,7 @@ def serve(store: Store, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
     if socket_path:
         build_unix_server(store, socket_path, runtime)
     runtime.publish()
-    AutoRefresher(store, primary.api.refresh).start()  # type: ignore[attr-defined]
+    AutoRefresher(store, primary.api.refresh, stop=runtime.stopped).start()  # type: ignore[attr-defined]
     if runtime.idle_exit:
         IdleWatchdog(runtime).start()
     for server in runtime.servers[1:]:

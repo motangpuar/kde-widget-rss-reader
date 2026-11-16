@@ -1,6 +1,7 @@
 """Tests for the daemon's lifetime and transport layer: unix socket, endpoint file,
 clean shutdown, idle reaper and the single-instance lock."""
 
+import io
 import json
 import os
 import subprocess
@@ -190,3 +191,145 @@ class SingleInstanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClockTests(unittest.TestCase):
+    """The lifetime layer must measure *running* time, not wall-clock time.
+
+    A laptop that sleeps for three hours must not look idle for three hours: CLOCK_REALTIME
+    advances during suspend and jumps on NTP steps, and the reaper used to kill a daemon whose
+    client was on screen (issue #2, mechanism A).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.env = mock.patch.dict(os.environ, {
+            "XDG_RUNTIME_DIR": str(self.root / "run"),
+            "XDG_DATA_HOME": str(self.root / "data"),
+            "XDG_CACHE_HOME": str(self.root / "cache"),
+        })
+        self.env.start()
+        self.store = Store(self.root / "clock.db")
+
+    def tearDown(self):
+        self.store.db.close()
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_lock_lives_in_the_data_dir_not_the_session_runtime_dir(self):
+        # A wipe of $XDG_RUNTIME_DIR must not hand a second daemon a fresh lock inode.
+        self.assertTrue(str(config.lock_path()).startswith(str(config.data_dir())))
+        self.assertFalse(str(config.lock_path()).startswith(str(config.runtime_dir())))
+
+    def test_idle_for_ignores_a_wall_clock_jump(self):
+        runtime = api_mod.Runtime(idle_exit=900, clock=lambda: 100.0)
+        runtime.touch()
+        with mock.patch.object(api_mod.time, "time", lambda: 100.0 + 10800):
+            # Three hours of suspend show up on the wall clock and must not count.
+            self.assertEqual(runtime.idle_for(), 0.0)
+
+    def test_idle_for_counts_running_time(self):
+        now = [100.0]
+        runtime = api_mod.Runtime(idle_exit=900, clock=lambda: now[0])
+        runtime.touch()
+        now[0] += 42.0
+        self.assertAlmostEqual(runtime.idle_for(), 42.0)
+
+    def test_watchdog_does_not_exit_on_a_wall_clock_jump(self):
+        runtime = api_mod.Runtime(idle_exit=1, clock=lambda: 100.0)
+        runtime.publish()
+        runtime.touch()
+        watchdog = api_mod.IdleWatchdog(runtime)
+        with mock.patch.object(api_mod.time, "time", lambda: 100.0 + 10800):
+            watchdog.start()
+            time.sleep(2.6)
+            self.assertFalse(runtime.stopped.is_set(),
+                             "wall-clock jump must not count as idleness")
+        runtime.stop()
+
+    def test_watchdog_exits_when_the_published_endpoint_disappears(self):
+        runtime = api_mod.Runtime(idle_exit=600, clock=lambda: 100.0)
+        runtime.publish()
+        runtime.touch()
+        self.assertTrue(runtime.published_identity())
+        watchdog = api_mod.IdleWatchdog(runtime)
+        watchdog.start()
+        config.endpoint_path().unlink()
+        deadline = time.time() + 8
+        while time.time() < deadline and not runtime.stopped.is_set():
+            time.sleep(0.2)
+        self.assertTrue(runtime.stopped.is_set(),
+                        "a daemon whose endpoint file vanished must reap itself")
+        self.assertFalse(runtime.published_identity())
+
+    def test_auto_refresher_skips_the_suspend_storm(self):
+        class Manager:
+            def __init__(self):
+                self.state = {"running": False}
+                self.started = []
+
+            def start(self, feeds=None):
+                self.started.append(feeds)
+
+        now = {"mono": 0.0, "wall": 1_000_000.0}
+        self.store.add_feed("http://example.invalid/feed.xml", "t", "http://example.invalid")
+        # Pretend the feed was fetched a moment ago; add_feed leaves last_fetch at 0 (due at once).
+        self.store.db.execute("update feeds set last_fetch = ?", (1_000_000.0,))
+        self.store.db.commit()
+        manager = Manager()
+        refresher = api_mod.AutoRefresher(self.store, manager,
+                                          clock=lambda: now["mono"],
+                                          wall=lambda: now["wall"])
+        refresher.poll()
+        self.assertEqual(manager.started, [], "a fresh feed is not due")
+
+        now["wall"] += 10800          # three hours of suspend
+        now["mono"] += 1.0
+        refresher.poll()
+        self.assertEqual(manager.started, [], "suspend must not look like three hours of age")
+
+        now["wall"] += 1800           # half an hour of running time
+        now["mono"] += 1800
+        refresher.poll()
+        self.assertEqual(len(manager.started), 1, "elapsed running time still refreshes")
+
+
+class AccessLogTests(unittest.TestCase):
+    """The access log is the end-to-end oracle for the widget: it must never break a request.
+
+    ``BaseHTTPRequestHandler.address_string`` reads ``client_address[0]``, which is empty for an
+    AF_UNIX peer, so logging used to raise IndexError and the request never got a response - a
+    live daemon that looked dead from the widget's side.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.env = mock.patch.dict(os.environ, {
+            "XDG_RUNTIME_DIR": str(self.root / "run"),
+            "XDG_DATA_HOME": str(self.root / "data"),
+            "XDG_CACHE_HOME": str(self.root / "cache"),
+        })
+        self.env.start()
+        self.sock = str(self.root / "run" / "knews-curator" / "knewsd.sock")
+        self.store = Store(self.root / "log.db")
+        self.runtime = api_mod.Runtime(idle_exit=0)
+        self.unix = api_mod.build_unix_server(self.store, self.sock, self.runtime)
+        self.thread = threading.Thread(
+            target=self.unix.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.unix.shutdown()
+        self.unix.server_close()
+        self.store.db.close()
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_access_log_does_not_break_unix_requests(self):
+        with mock.patch.object(api_mod, "ACCESS_LOG", True), \
+                mock.patch.object(api_mod.sys, "stderr", new=io.StringIO()) as captured:
+            health = api_mod.Client(socket_path=self.sock).health()
+            self.assertIsNotNone(health, "a logged request must still answer")
+            self.assertIn("request unix - ", captured.getvalue())

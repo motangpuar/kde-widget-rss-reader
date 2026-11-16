@@ -9,6 +9,17 @@ function setPort(port) {
 
 function request(method, path, body, callback) {
     var xhr = new XMLHttpRequest()
+    var settled = false
+
+    // Every exit goes through finish(): a request must report exactly once, or the caller's
+    // loading flag stays true and the widget looks frozen instead of offline.
+    function finish(status, data, text) {
+        if (settled)
+            return
+        settled = true
+        callback(status, data, text)
+    }
+
     xhr.onreadystatechange = function () {
         if (xhr.readyState !== XMLHttpRequest.DONE)
             return
@@ -18,17 +29,22 @@ function request(method, path, body, callback) {
         } catch (e) {
             data = null
         }
-        callback(xhr.status, data, xhr.responseText)
+        finish(xhr.status, data, xhr.responseText)
     }
+    // A loopback call that errors or hangs is a dead backend, not a slow one. Report it as offline
+    // immediately (status 0) so the supervisor restarts it and the spinner stops.
+    xhr.onerror = function () { finish(0, null, "network") }
+    xhr.ontimeout = function () { finish(0, null, "timeout") }
+    xhr.timeout = 15000
+
     xhr.open(method, base + path, true)
     xhr.setRequestHeader("X-Knews-Client", clientHeader)
     if (body !== null && body !== undefined)
         xhr.setRequestHeader("Content-Type", "application/json")
-    xhr.timeout = 60000
     try {
         xhr.send(body === null || body === undefined ? null : JSON.stringify(body))
     } catch (e) {
-        callback(0, null, String(e))
+        finish(0, null, String(e))
     }
 }
 

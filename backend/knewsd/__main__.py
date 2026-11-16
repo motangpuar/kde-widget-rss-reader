@@ -22,7 +22,7 @@ from .config import DEFAULT_IDLE_EXIT, DEFAULT_PORT, VERSION, db_path
 from .db import Store
 
 def _lock() -> object:
-    """Take the per-session daemon lock; returns None when another instance owns it.
+    """Take the per-user daemon lock; returns None when another instance owns it.
 
     Without XDG_RUNTIME_DIR (or a writable one) locking is skipped and the port bind decides
     who wins — the lock is a convenience, not the security boundary.
@@ -31,9 +31,10 @@ def _lock() -> object:
         handle = open(config.lock_path(), "a+", encoding="utf-8")
     except OSError:
         return _NoLock
-    # A sibling that was just asked to stop can hold the lock for a few hundred milliseconds;
-    # waiting briefly turns that race into a clean restart instead of a refused start.
-    deadline = time.time() + 5.0
+    # A sibling that was just asked to stop can hold the lock for a few hundred milliseconds,
+    # and a daemon that lost its runtime dir exits on its next watchdog tick (<= 5 s). Waiting
+    # briefly turns both races into a clean restart instead of a refused start.
+    deadline = time.time() + 10.0
     while True:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

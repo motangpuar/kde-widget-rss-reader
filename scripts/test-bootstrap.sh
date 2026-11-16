@@ -21,6 +21,11 @@ HOME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/knews-bootstrap.XXXXXX")
 PYZ="$PKG/knewsd.pyz"
 BACKUP="$PYZ.orig"
 
+# Never test a stale artifact: the zipapp is gitignored and only rebuild.sh regenerates it.
+if [ ! -f "$PYZ" ] || [ -n "$(find "$ROOT/backend/knewsd" -name '*.py' -newer "$PYZ" -print -quit)" ]; then
+    "$ROOT/build.sh" >/dev/null
+fi
+
 export HOME="$HOME_DIR"
 export XDG_DATA_HOME="$HOME_DIR/.local/share"
 export XDG_CACHE_HOME="$HOME_DIR/.cache"
@@ -139,6 +144,22 @@ grep -q BOOTSTRAP_STARTED <<<"$out" || fail "empty --socket did not start a daem
 printf '  empty --socket resolved to %s, previous port daemon stopped\n' "$SOCK"
 out=$(bootstrap --stop) || fail "--stop after the default-socket test failed: $out"
 
+printf '== runtime dir wiped under a live daemon\n'
+# Logout of a nested session can remove $XDG_RUNTIME_DIR without killing the daemon. The lock
+# lives in the data dir, so a second daemon cannot start; the orphan notices its published
+# endpoint is gone and reaps itself, which frees the lock for the replacement.
+out=$(bootstrap --socket '') || fail "socket start before the wipe failed: $out"
+WIPE_PID=$(field "$(cat "$ENDPOINT")" pid)
+rm -rf "$XDG_RUNTIME_DIR/knews-curator"
+out=$(KNEWS_IDLE_EXIT=30 bootstrap --socket '') || fail "bootstrap after the wipe failed: $out"
+grep -q BOOTSTRAP_STARTED <<<"$out" || fail "expected a new daemon after the wipe, got: $out"
+sleep 3
+[ "$(pgrep -fc "$APP" || true)" = "1" ] || fail "expected exactly one daemon after the wipe"
+[ "$(field "$(cat "$ENDPOINT")" pid)" != "$WIPE_PID" ] || fail "endpoint still names the orphan"
+kill -0 "$WIPE_PID" 2>/dev/null && fail "the orphan (pid $WIPE_PID) survived the wipe"
+printf '  orphan %s reaped itself, one daemon left\n' "$WIPE_PID"
+out=$(bootstrap --stop) || fail "--stop after the wipe test failed: $out"
+
 printf '== socket mode\n'
 out=$(bootstrap --port "$PORT" --stop) || fail "--stop failed: $out"
 out=$(bootstrap --socket "$SOCK") || fail "socket bootstrap failed: $out"
@@ -164,6 +185,20 @@ sleep 7
 [ -z "$(probe_port "$PORT")" ] || fail "backend ignored --idle-exit 2"
 [ -f "$ENDPOINT" ] && fail "endpoint file survived the idle exit"
 printf '  client-less daemon exited and cleaned up\n'
+
+printf '== wedged daemon is replaced\n'
+# A daemon that is alive and holds the lock but answers nothing must not block the widget
+# forever: the bootstrap replaces it once.
+out=$(bootstrap --socket '') || fail "start before the wedge test failed: $out"
+WEDGED=$(field "$(cat "$ENDPOINT")" pid)
+kill -STOP "$WEDGED"          # alive, holding the lock, answering nothing
+out=$(bootstrap --socket '') || fail "bootstrap did not recover the wedged daemon: $out"
+grep -q BOOTSTRAP_STARTED <<<"$out" || fail "expected BOOTSTRAP_STARTED after the wedge, got: $out"
+kill -0 "$WEDGED" 2>/dev/null && fail "the wedged daemon survived"
+[ "$(pgrep -fc "$APP" || true)" = "1" ] || fail "expected exactly one daemon after the recovery"
+[ -n "$(probe_sock "$SOCK")" ] || fail "socket does not answer after the recovery"
+printf '  wedged daemon %s replaced, one daemon left\n' "$WEDGED"
+out=$(bootstrap --stop) || fail "--stop after the wedge test failed: $out"
 
 printf '== foreign daemon is left alone\n'
 FOREIGN="$HOME_DIR/foreign"
