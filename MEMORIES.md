@@ -262,6 +262,14 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
   +3 h jump and the resume refresh) and a `test-bootstrap.sh` runtime-wipe case; 58 tests green.
   Lesson: `test-bootstrap.sh` now rebuilds the zipapp when sources are newer — it had been
   testing a stale artifact and hid the lock change.
+- 2026-11-17 **1.10.0 released** (`v1.10.0` = `94e514e`). CI 47 s, Release 64 s, both green.
+  First release whose body comes from `CHANGELOG.md` through `scripts/release-notes.sh` (55 lines,
+  Added/Changed/Fixed/Removed) instead of `--generate-notes`. Assets:
+  `.plasmoid` 82 909 B, `news-curator-1.10.0.tar.gz` 137 906 B (56 entries, ships `docs/` and
+  `CHANGELOG.md`), `SHA256SUMS` 209 B; `sha256sum -c` passes after download, the plasmoid reports
+  1.10.0, and the bundled `knewsd.pyz` contains the monotonic idle, `IconRepair`, ICO support,
+  home-page icon derivation and the `address_string` fix. Host reinstalled at 1.10.0 (applet
+  metadata and daemon both report 1.10.0); issues #2, #3 and #4 carry a release comment.
 - 2026-11-17 1.10.0 prepared: five commits squashed by concern (backend lifetime, favicons, UI,
   packaging, docs), version bumped in both homes (metadata.json + config.py, plus the `/api/health`
   example in docs/API.md), and `CHANGELOG.md` added. `scripts/release-notes.sh <version>` extracts
