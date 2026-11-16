@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 APP = "knews-curator"
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 DEFAULT_PORT = 8770
 # Seconds without a single request before the daemon exits. The widget is the supervisor and
 # keeps it alive with its 60 s poll; the timeout only reaps a process whose client disappeared

@@ -1,6 +1,6 @@
 [Unit]
 Description=News Curator feed backend (knewsd)
-Documentation=https://github.com/infidel/kde-news-curator
+Documentation=https://github.com/motangpuar/kde-widget-rss-reader
 After=network-online.target
 Wants=network-online.target
 

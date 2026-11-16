@@ -21,6 +21,13 @@ ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 PORT=${KNEWS_PORT:-8770}
 SYSTEMD=0
 
+# Plasma tooling lives in the host session, not in a distrobox container. Re-exec *before* the
+# arguments are consumed: parsing here and forwarding "$@" afterwards handed the host instance an
+# empty argument list, so --systemd was silently ignored.
+if ! command -v kpackagetool6 >/dev/null 2>&1 && command -v distrobox-host-exec >/dev/null 2>&1; then
+    exec distrobox-host-exec bash "$PROJECT_DIR/install.sh" "$@"
+fi
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --systemd) SYSTEMD=1 ;;
@@ -29,11 +36,6 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-
-# Plasma tooling lives in the host session, not in a distrobox container.
-if ! command -v kpackagetool6 >/dev/null 2>&1 && command -v distrobox-host-exec >/dev/null 2>&1; then
-    exec distrobox-host-exec bash "$PROJECT_DIR/install.sh" "$@"
-fi
 
 log() { printf '  %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }

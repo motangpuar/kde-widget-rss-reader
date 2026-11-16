@@ -168,6 +168,100 @@ plus four driver scenarios (validate, bulk, export, delete) verified under the o
 
 ## Chronological History
 
+- 2026-11-17 systemd mode tested live for the first time: `./install.sh --systemd` failed first
+  because the distrobox re-exec ran *after* the argument loop, so the host instance received an
+  empty argv and `--systemd` was silently ignored (default branch printed "none installed"). Fixed
+  by re-execing before parsing, with a `ci-local.sh` gate on the order. Then: unit `active`, health
+  `transport port`, `idle_exit 0`, `KNEWS_ACCESS_LOG=1`, 25 feeds intact; widget load logged
+  `bootstrap: backend <pid> is not ours, leaving it alone` (adopt, no second daemon);
+  `bootstrap --stop` refused and printed `BOOTSTRAP_STOPPED` while the unit stayed up; `kill -9`
+  on the daemon → systemd restored it in 6 s with a new pid; `Linger=yes`, so the unit survives
+  logout. Reverted afterwards with `uninstall.sh` + `install.sh` (unit gone, daemon back on the
+  socket) to keep the documented default.
+- 2026-11-17 systemd readiness audit: the unit verifies clean (`systemd-analyze verify`, systemd
+  259) but **no script exercises it** — `ci-local.sh` only greps two keys, `simulate-install.sh`
+  asserts its *absence*, `test-bootstrap.sh` never installs one. Every change since 1.9.0 kept the
+  path working on paper: `--systemd` copies the `backend/knewsd` package (ExecStart is
+  `-m knewsd`), stops the widget daemon to hand over, enables + restarts, and `ProtectSystem`
+  writability for `%t/knews-curator` is in place. Coexistence with the socket default was checked
+  in code: the unit's cmdline lacks the `.pyz` path, so bootstrap adopts it rather than killing it.
+  Two fixes landed anyway: the launcher now restarts in the *attached* transport
+  (`attachedToPort`) so a retry during a unit restart cannot spawn a second daemon, and the
+  `Documentation=` URL pointed at a nonexistent repo. A `systemd unit` gate now checks the URL,
+  the reaper switch, the runtime-dir write path and `-m knewsd`.
+- 2026-11-17 favicon parity with the browser found four defects: `.ico` was never accepted
+  (`_EXT_BY_TYPE` had no `image/x-icon`, no ICO magic) so the most common favicon on the web was
+  dropped; declared `<link rel=icon>` was tried only after `/favicon.ico` and only in deep mode;
+  the regex needed quoted `href` and ignored `<base href>`, `apple-touch-icon` and `sizes`; and
+  `feeds.site` is often the feed document itself (`/feed/`, `feed.xml`), so the "home page" scan
+  read XML and found no icons at all. Fixes: ICO/CUR magic + types, sniff small bodies even when
+  the server mislabels the type, `_icon_links` (base href, unquoted attrs, svg/first, sizes desc),
+  `icon_attempts()` returning `(declared, fallbacks)` with `/favicon.ico|.png|apple-touch-icon.png`
+  guesses, and the home page derived from the feed URL origin. New `POST /api/icons/refresh`
+  (`IconRepair`, background, progress in `/api/state.icons`) plus Settings → *Refresh source
+  icons*; repair never downgrades a stored icon to a guess. Live result on the user's 25 feeds:
+  17 → 21 icons (png 8, ico 10, svg 3); the remaining 4 declare nothing, return 403, or serve an
+  empty `/favicon.ico` — the browser shows a generic icon for those too.
+- 2026-11-17 header/list polish: overflow menu removed (one icon per action again) and the list
+  gained `rightMargin` so titles stop running under the ScrollBar overlay.
+- 2026-11-17 lifetime verified against lock/suspend: **lock** — the daemon is untouched by the
+  screen locker (same pid/port across a 30 s lock; when killed while locked the supervisor
+  restarted it at 01:01:22, unlock was 01:01:26, no QML error, no plasmashell crash). **suspend** —
+  live proof with the shipped zipapp under faketime: a +3 h wall-clock jump leaves it ALIVE, still
+  answering `/api/health`, with 0 idle-reaper messages (before the monotonic fix it exited with
+  `idle for 10804s`). Session death is the only thing that stops it, and the widget respawns it.
+- 2026-11-17 gotcha: scratch daemons started from the container share `/run/user/1000` with the
+  host, so `runtime.publish()` **overwrites the widget's `endpoint.json`** with the scratch port.
+  Symptom: the host's endpoint file names a pid that no longer exists while the socket still
+  answers. Always run scratch daemons with `XDG_RUNTIME_DIR=/tmp/<x>`; repair by
+  `bootstrap.sh --stop` + `bootstrap.sh --socket ''`.
+- 2026-11-17 lockscreen simulation (issue #2): locked the session with
+  `qdbus-qt6 org.kde.screensaver /ScreenSaver org.freedesktop.ScreenSaver.SetActive true`, killed
+  the daemon while locked, unlocked. No QML error, no plasmashell crash; the supervisor restarted
+  the backend ~14 s later. Two real bugs surfaced instead: (a) with `KNEWS_ACCESS_LOG=1` every
+  unix-socket request raised `IndexError: string index out of range` inside
+  `BaseHTTPRequestHandler.address_string`, so a *live* daemon answered nothing — the exact
+  "backend dead, widget frozen" shape; fixed by overriding `address_string` (returns `unix`) and
+  guarding `log_message`, with a regression test; (b) a daemon that is alive, holds the data-dir
+  lock and answers nothing blocks every replacement, so `bootstrap.sh` now resolves the lock pid,
+  TERMs it (then KILLs), and retries once — new `test-bootstrap.sh` case "wedged daemon is
+  replaced" (`kill -STOP` to freeze it). `Api.js` also gained `onerror`/`ontimeout` with a single
+  settle path and a 15 s timeout so a hung loopback call reports offline instead of freezing the
+  spinner.
+- 2026-11-17 issue #4 UI (unreleased, same branch): the scope button gained a chevron
+  (`arrow-down`, verified at 22 px; placed inside the click target with reserved
+  `rightPadding`), and `ArticleList` grew a status strip above the list that is hidden while
+  healthy, separates *never started* from *silently died* (`backendEverUp`), and carries
+  **Restart backend**. Verified by `qmllint` only — no QML runtime on the host.
+- 2026-11-17 issue #3 update check (unreleased): `Plasmoid.metaData.version` vs the latest GitHub
+  release, 24 h throttle persisted in KConfig (`updateCheck`/`updateCheckedAt`/`skippedVersion`),
+  one `notify-send` per load through the `plasma5support` executable engine, failures silent,
+  update = `Qt.openUrlExternally`. Surfaces: list strip + *Settings → Updates* (check now, skip
+  reset). Check result is persisted in `availableVersion`, otherwise the 24 h throttle would hide
+  a known update on the next plasmashell start.
+- 2026-11-17 update-check lessons: `Plasmoid.metaData.version` comes from plasmashell's package
+  metadata cache, so editing the *installed* `metadata.json` does not change what a running
+  widget reports (a patched 1.8.0 still logged `installed 1.9.1`). To demo the strip without a
+  release, write `availableVersion=9.9.9` into the applet's `Configuration/General` group
+  (`Containments/908/Applets/922`) and reload; `restoreUpdate()` surfaces it and logs
+  `newscurator update: showing 9.9.9`. Real check evidence:
+  `newscurator update check: latest 1.9.0 installed 1.9.1`.
+- 2026-11-17 issue #2 reproduced before fixing (`/tmp/sim2`, faketime, throwaway HOME): three
+  mechanisms — (A) `Runtime.idle_for()` on `CLOCK_REALTIME` exited after a +3 h jump with a live
+  client, a race the client loses when plasmashell is slow to resume; (B) nothing re-spawned the
+  daemon after a silent death (`backendRetry` arms only from bootstrap `onFinished`), so the UI
+  stayed offline until reload; (C) a runtime-dir wipe left the flock on a deleted inode and put
+  two daemons on one DB. Not broken: `kill -9` mid-refresh (`integrity_check ok`, WAL replays),
+  stale socket unlink, adoption of a surviving port daemon.
+- 2026-11-17 fixes for issue #2 (1.9.1 line): `Runtime.clock` defaults to `time.monotonic`
+  (`started` stays wall clock), watchdog waits on the stop event and reaps a daemon whose
+  `endpoint.json` vanished or names another pid, `AutoRefresher` folds wall-clock drift into a
+  skew so resume cannot storm every feed, the single-instance flock moved to the data dir (10 s
+  wait so a self-reaping orphan can release it), and `main.qml` gained `backendSupervisor`
+  (5 s→60 s backoff, sticky `backendStoppedByUser`). Tests: `ClockTests` (6 cases incl. the
+  +3 h jump and the resume refresh) and a `test-bootstrap.sh` runtime-wipe case; 58 tests green.
+  Lesson: `test-bootstrap.sh` now rebuilds the zipapp when sources are newer — it had been
+  testing a stale artifact and hid the lock change.
 - 2026-11-12 **1.9.0 released** (`v1.9.0` = `83364b4`, fast-forward merge of
   `fix/backend-lifetime` into `main`, 4 commits, 22 files, +1725/-259). CI and Release green in
   36 s / 39 s; assets `io.github.infidel.newscurator-1.9.0.plasmoid` 70 393 B,

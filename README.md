@@ -81,7 +81,20 @@ python3 ~/.local/share/knews-curator/app/knewsd.pyz --probe --socket "$XDG_RUNTI
 
 The bootstrap is idempotent: it answers `/api/health` first, so it does nothing when a backend
 already runs, restarts it when the package ships a newer version, and leaves a foreign or
-systemd-managed daemon holding the port alone. It never writes an autostart entry; an entry left
+systemd-managed daemon holding the port alone.
+
+New releases are noticed without a store client: once a day the widget compares its own version
+with the latest GitHub release and, if `notify-send` is available, sends a single notification.
+The result is a row above the article list and a card in *Settings → Updates* with **Check now**
+and **Skip this version** — it never downloads or installs anything. The check is opt-out and any
+network failure stays silent.
+
+If the daemon dies anyway — killed by the OOM reaper, torn down with the session, or crashed —
+the widget restarts it on its own: a supervisor timer retries with backoff (5 s doubling to
+60 s, reset as soon as `/api/state` answers). No reload, no terminal. Idleness is measured in
+*running* time, so a laptop that slept for a night does not look idle and the daemon is not
+reaped while the widget is on screen; the single-instance lock lives in the data directory, so a
+session that removes `$XDG_RUNTIME_DIR` cannot leave two daemons on one database. It never writes an autostart entry; an entry left
 behind by 1.8.x is deleted on sight.
 
 ### From a release

@@ -50,6 +50,19 @@ for wf in "${WORKFLOWS[@]}"; do
     printf '  %s\n' "$wf"
 done
 
+step "installer arguments"
+python3 - <<'PY'
+import pathlib, sys
+lines = pathlib.Path("install.sh").read_text().splitlines()
+rexec = next((i for i, l in enumerate(lines) if "distrobox-host-exec" in l and l.strip().startswith("exec")), None)
+parse = next((i for i, l in enumerate(lines) if l.startswith("while [ $# -gt 0 ]")), None)
+if rexec is None or parse is None:
+    sys.exit("install.sh: could not locate the re-exec or the argument loop")
+if rexec > parse:
+    sys.exit("install.sh: re-exec must happen before the arguments are consumed, or --systemd is lost")
+print("  installer re-execs before parsing, so flags survive the distrobox hop")
+PY
+
 step "systemd unit"
 grep -q '^Environment=KNEWS_IDLE_EXIT=0$' systemd/knewsd.service \
     || { echo "error: the unit must own the lifetime, so the idle reaper is off" >&2; exit 1; }
@@ -97,6 +110,23 @@ line = [l for l in boot.splitlines() if "--socket)" in l]
 if not line or "${2?--socket" not in line[0]:
     sys.exit("--socket must accept an empty value (the per-session default path)")
 print("  socket is the default transport; empty --socket accepted")
+PY
+
+step "systemd unit"
+python3 - <<'PY'
+import pathlib, re, sys
+unit = pathlib.Path("systemd/knewsd.service").read_text()
+if "motangpuar/kde-widget-rss-reader" not in unit:
+    sys.exit("unit Documentation= does not point at the project")
+if "Environment=KNEWS_IDLE_EXIT=0" not in unit:
+    sys.exit("unit must disable the idle reaper; the OS owns the lifetime")
+if "ReadWritePaths=-%t/knews-curator" not in unit:
+    sys.exit("unit must let the daemon write its socket and endpoint file")
+if "-m knewsd" not in unit:
+    sys.exit("unit must run the installed code package (-m knewsd)")
+if not pathlib.Path("backend/knewsd/__main__.py").is_file():
+    sys.exit("the package the unit runs is missing from the repo")
+print("  unit valid: project URL, reaper off, runtime dir writable, runs -m knewsd")
 PY
 
 step "metadata"

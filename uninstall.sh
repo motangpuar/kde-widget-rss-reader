@@ -79,6 +79,7 @@ fi
 rm -f "$ICON_DIR/newscurator.svg" "$ICON_DIR/newscurator-symbolic.svg"
 rm -rf "$APP_DIR/app"
 rm -f "$RUNTIME_DIR/knewsd.lock" "$RUNTIME_DIR/knewsd.sock"
+rm -f "$APP_DIR/knewsd.lock"
 rmdir "$RUNTIME_DIR" 2>/dev/null || true
 log "code removed"
 

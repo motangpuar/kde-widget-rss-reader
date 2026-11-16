@@ -67,7 +67,7 @@ supervisor per deployment:
 
 | Deployment | Supervisor | Lifetime |
 |---|---|---|
-| store package | the widget (`BackendLauncher.qml`) | spawned on widget load, stopped in `Component.onDestruction`, reaped by `KNEWS_IDLE_EXIT` (900 s default) |
+| store package | the widget (`BackendLauncher.qml` + supervisor timer) | spawned on widget load, re-spawned with backoff while offline, stopped in `Component.onDestruction`, reaped by `KNEWS_IDLE_EXIT` (900 s default) |
 | `install.sh --systemd` (opt-in) | `systemd --user` (`knewsd.service`) | unit owns it; `Environment=KNEWS_IDLE_EXIT=0` disables the reaper |
 
 - **No autostart entry, no init system in the default path.** 1.8.x wrote
@@ -77,16 +77,41 @@ supervisor per deployment:
   icons: no unit, no autostart, no process. The widget works on systems without systemd.
 - **Orphan prevention is server-side**: the invariant "no process without a client" is enforced
   by the idle reaper inside `knewsd`, so a `plasmashell` crash or a `kpackagetool6 --remove`
-  cannot leak a listener. Client cleanup is a convenience, not the guarantee.
-- **Single instance** = `flock` on `$XDG_RUNTIME_DIR/knews-curator/knewsd.lock` **and** bind of
-  the configured endpoint **and** an identity check over `/api/health` (`ok`, `version`, `pid`)
-  before a client trusts a listener. A bound port alone proves nothing.
+  cannot leak a listener. Client cleanup is a convenience, not the guarantee. The reaper also
+  exits when its published `endpoint.json` disappears or names another pid — a daemon whose
+  runtime dir was removed is unreachable and must not keep refreshing the database.
+- **Idle means running time**: `Runtime.clock` defaults to `time.monotonic` and `AutoRefresher`
+  folds wall-clock jumps into a skew. Never measure lifetime with `time.time()`: it advances
+  during suspend and jumps on NTP steps, which killed a daemon after a laptop slept (issue #2).
+- **Single instance** = `flock` on `~/.local/share/knews-curator/knewsd.lock` (data dir, *not*
+  the session runtime dir, which is deleted on logout and would hand a second daemon a fresh
+  inode) **and** bind of the configured endpoint **and** an identity check over `/api/health`
+  (`ok`, `version`, `pid`) before a client trusts a listener. A bound port alone proves nothing.
+- **The widget supervises; it is not a one-shot launcher**: `fail()` leaves `backendUp = false`,
+  which arms `backendSupervisor` (5 s doubling to 60 s, reset on the first successful
+  `/api/state`). It calls the idempotent bootstrap start, never a raw spawn. *Stop backend* is
+  sticky (`backendStoppedByUser`) so the supervisor cannot override the user.
 - **Transports**: **unix socket by default** (`--socket ''` resolves to the runtime path;
   `connection=socket` in `contents/config/main.xml`), HTTP over loopback on request (`--port`).
   QML cannot speak HTTP over `AF_UNIX`, so socket mode also binds an ephemeral loopback port and
   publishes both channels in `$XDG_RUNTIME_DIR/knews-curator/endpoint.json`, printing
   `BOOTSTRAP_ENDPOINT <json>` for the widget. Never a TCP port on a non-loopback address.
-- **Restart/stop are user-facing**: *Settings → Backend* and `bootstrap.sh --restart|--stop`;
+- **Update check is opt-out, not automatic installation**: `main.qml` compares
+  `Plasmoid.metaData.version` with the latest GitHub release once per 24 h
+  (`updateCheckedAt` in KConfig), never in the startup path (`updateTimer` 20 s). Any failure
+  is silent; the update itself is a browser link, never a download. The result surfaces in the
+  backend/update strip above the list and in *Settings → Updates*.
+- **The list strip is the only "something is wrong" surface**: hidden while healthy (no layout
+  shift), it distinguishes *never started* from *silently died* (`backendEverUp`) and carries
+  **Restart backend**; the update rows carry **Update** and **Skip this version**. Keep the strip
+  data-driven so new states do not relayout the pane.
+- **Coexistence with the opt-in unit**: the unit runs `python3 -m knewsd --port N`, so its
+  cmdline does **not** contain the zipapp path; `stop_daemon`/the OURS check therefore treat it as
+  foreign and the widget *attaches* (`BOOTSTRAP_ALREADY`) instead of killing it. The launcher
+  remembers the attached transport (`attachedToPort`) and restarts with `--port N` while attached,
+  so a supervisor retry during a unit restart cannot spawn a second daemon on another endpoint.
+- **Restart/stop are user-facing**: *Settings → Backend* and `bootstrap.sh --restart|--stop`
+  (the supervisor retries on its own, so a manual restart is an accelerator, not a requirement);
   `install.sh` calls `--stop` before starting the unit to hand the port over.
 - **systemd hardening gotcha**: `ProtectSystem=strict` makes `$XDG_RUNTIME_DIR` read-only, so the
   unit lists `ReadWritePaths=-%t/knews-curator`; `config.runtime_dir()` also falls back to the
