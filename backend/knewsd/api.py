@@ -101,10 +101,57 @@ class RefreshManager:
             self.state["finished"] = time.time()
 
 
+class IconRepair:
+    """Re-discover feed icons in the background, one feed at a time.
+
+    The stored favicon can be wrong: it may come from ``/favicon.ico`` while the site declares a
+    proper logo, or it may predate ICO support. Repair re-runs the full browser-order discovery
+    (declared icons first) and replaces the file URI.
+    """
+
+    def __init__(self, store: Store) -> None:
+        self.store = store
+        self._thread: threading.Thread | None = None
+        self.state: dict[str, Any] = {"running": False, "done": 0, "total": 0, "updated": 0,
+                                      "finished": 0}
+
+    def start(self) -> bool:
+        if self.state["running"]:
+            return False
+        feeds = self.store.feeds()
+        if not feeds:
+            return False
+        self.state = {"running": True, "done": 0, "total": len(feeds), "updated": 0,
+                      "finished": 0}
+        self._thread = threading.Thread(target=self._run, args=(feeds,), daemon=True,
+                                        name="knewsd-icons")
+        self._thread.start()
+        return True
+
+    def _run(self, feeds: list[dict[str, Any]]) -> None:
+        for feed in feeds:
+            try:
+                before = feed.get("icon") or ""
+                declared, fallbacks = fetchmod.icon_attempts(feed, deep=True)
+                # Never downgrade: a site that declares icons gets those, and when it declares
+                # none (unreachable, rate limited) an existing icon is kept instead of being
+                # replaced by a /favicon.ico guess. Only a feed with no icon tries the guesses.
+                targets = declared if declared else ([] if before else fallbacks)
+                after = fetchmod.try_icon_sources(self.store, feed["id"], targets)
+                if after and after != before:
+                    self.state["updated"] += 1
+            except Exception:  # noqa: BLE001 - one bad site must not stop the repair
+                pass
+            self.state["done"] += 1
+        self.state["running"] = False
+        self.state["finished"] = time.time()
+
+
 class Api:
     def __init__(self, store: Store) -> None:
         self.store = store
         self.refresh = RefreshManager(store)
+        self.icons = IconRepair(store)
 
     # ------------------------------------------------------------ serialisers
     def state(self) -> dict[str, Any]:
@@ -115,6 +162,7 @@ class Api:
             "counts": self.store.counts(),
             "prefs": self.store.prefs(),
             "refresh": self.refresh.state,
+            "icons": self.icons.state,
             "export_dir": str(Path.home() / "Downloads"),
             "version": VERSION,
         }
@@ -592,6 +640,9 @@ class Handler(BaseHTTPRequestHandler):
                                             folder or None,
                                             [int(i) for i in ids] if ids else None)
                 self._send(200, {"ok": True, "changed": changed, "state": self.api.state()})
+            elif route == "/api/icons/refresh":
+                started = self.api.icons.start()
+                self._send(200, {"started": started, "status": self.api.icons.state})
             elif route == "/api/refresh":
                 feed_id = body.get("feed")
                 started = self.api.refresh.start(int(feed_id) if feed_id else None)

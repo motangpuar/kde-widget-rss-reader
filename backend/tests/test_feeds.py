@@ -137,3 +137,40 @@ class FeedParseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FaviconTests(unittest.TestCase):
+    """Icons must be discovered the way a browser does it, or the widget shows the wrong logo."""
+
+    def test_declared_icons_beat_the_fallback_and_svg_wins(self):
+        from knewsd import fetch
+        html = (
+            "<html><head>"
+            "<link rel=icon href=/small.png sizes=32x32>"
+            "<link rel=\"shortcut icon\" type=\"image/svg+xml\" href=\"logo.svg\" sizes=\"any\">"
+            "<link rel=\"apple-touch-icon\" href=\"touch.png\">"
+            "</head></html>"
+        )
+        links = fetch._icon_links(html, "https://example.com/blog/")
+        self.assertEqual(links[0], "https://example.com/blog/logo.svg")
+        self.assertIn("https://example.com/blog/touch.png", links)
+        # "/small.png" is origin-rooted, like a browser resolves it.
+        self.assertEqual(links[-1], "https://example.com/small.png")
+
+    def test_base_href_and_unquoted_attributes(self):
+        from knewsd import fetch
+        html = '<html><head><base href="https://cdn.example/i/">' \
+               '<link rel=icon href=app.png></head></html>'
+        self.assertEqual(fetch._icon_links(html, "https://example.com/"),
+                         ["https://cdn.example/i/app.png"])
+
+    def test_ico_is_accepted(self):
+        from knewsd import fetch
+        ico = b"\x00\x00\x01\x00" + b"\x00" * 40
+        self.assertEqual(fetch._sniff_ext(ico, "application/octet-stream"), ".ico")
+        self.assertEqual(fetch._sniff_ext(b"\x00" * 40, "image/x-icon"), ".ico")
+
+    def test_svg_served_as_text_is_sniffed(self):
+        from knewsd import fetch
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>'
+        self.assertEqual(fetch._sniff_ext(svg, "text/plain"), ".svg")

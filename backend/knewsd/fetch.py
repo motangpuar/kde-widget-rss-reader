@@ -88,7 +88,12 @@ def http_get(
 _EXT_BY_TYPE = {
     "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/gif": ".gif",
     "image/webp": ".webp", "image/avif": ".avif", "image/svg+xml": ".svg",
+    # /favicon.ico is the most common icon on the web and Qt renders it, so it must be accepted.
+    "image/x-icon": ".ico", "image/vnd.microsoft.icon": ".ico", "image/ico": ".ico",
 }
+
+# Small payloads a browser would sniff even when the server lies about the type.
+_SNIFF_MAX_BYTES = 512 * 1024
 
 
 def _sniff_ext(blob: bytes, content_type: str) -> str:
@@ -105,6 +110,13 @@ def _sniff_ext(blob: bytes, content_type: str) -> str:
         return ".webp"
     if blob[4:12] in (b"ftypavif", b"ftypavis"):
         return ".avif"
+    if blob[:4] == b"\x00\x00\x01\x00":
+        return ".ico"
+    if blob[4:8] == b"\x00\x00\x02\x00":
+        return ".cur"
+    head = blob[:200].lstrip()
+    if head[:5].lower() == b"<svg " or (head[:5].lower() == b"<?xml" and b"<svg" in blob[:600].lower()):
+        return ".svg"
     return ""
 
 
@@ -126,14 +138,21 @@ def cache_image(url: str, timeout: float = 15.0) -> str:
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             ctype = response.headers.get("Content-Type", "")
-            if not ctype.lower().startswith("image/"):
+            declared = ctype.lower().startswith("image/")
+            # A browser sniffs the bytes; servers routinely serve icons as text/plain or
+            # application/octet-stream. Accept a *small* body that sniffs as an image, and keep
+            # the strict type check for anything large.
+            limit = MAX_IMAGE_BYTES if declared else min(MAX_IMAGE_BYTES, _SNIFF_MAX_BYTES)
+            blob = response.read(limit + 1)
+            if len(blob) > limit:
                 return ""
-            blob = response.read(MAX_IMAGE_BYTES + 1)
-            blob = _decode_body(blob[:MAX_IMAGE_BYTES], response.headers.get("Content-Encoding", ""))
+            blob = _decode_body(blob[:limit], response.headers.get("Content-Encoding", ""))
     except (urllib.error.URLError, OSError, ValueError):
         return ""
     ext = _sniff_ext(blob, ctype)
-    if not ext or len(blob) < 128:
+    if not ext or len(blob) < 16:
+        return ""
+    if not declared and not ext:
         return ""
     target = images / f"{key}{ext}"
     try:
@@ -212,54 +231,139 @@ def discover(address: str, limit: int = 6, timeout: float = 10.0) -> dict[str, A
     return {"url": final, "direct": False, "candidates": candidates, "message": message}
 
 
-def store_feed_icon(store: Store, feed: dict[str, Any], hint: str = "",
-                    deep: bool = False) -> str:
-    """Cache a favicon for the feed and persist the file URI on the row.
+def _icon_links(html_text: str, page_url: str) -> list[str]:
+    """Declared icons of a page, best candidate first.
 
-    ``deep=False`` only tries the feed's own icon and ``/favicon.ico`` so it can run on
-    the add-feed request path; ``deep=True`` also scans the home page for a link tag.
+    Mirrors what a browser does: honour ``<base href>``, accept unquoted attributes (minified
+    HTML), cover icon / shortcut icon / apple-touch-icon / mask-icon, and prefer SVG and the
+    largest declared size. ``/favicon.ico`` is *not* part of this list: it is the fallback, and a
+    declared icon that disagrees with it is usually the real logo.
     """
-    if feed.get("icon"):
-        return feed["icon"]
+    base = page_url
+    base_match = re.search(r"<base\b[^>]*href\s*=\s*[\"']?([^\"'\s>]+)", html_text, re.I)
+    if base_match:
+        base = urljoin(page_url, base_match.group(1))
+
+    found: list[tuple[int, int, str]] = []
+    for match in re.finditer(r"<link\b[^>]*>", html_text, re.I):
+        tag = match.group(0)
+        rel_match = re.search(r"rel\s*=\s*[\"']?([^\"'>]+)", tag, re.I)
+        if not rel_match:
+            continue
+        rel = rel_match.group(1).lower()
+        if not any(word in rel for word in ("icon", "apple-touch-icon", "mask-icon")):
+            continue
+        href_match = re.search(r"href\s*=\s*(?:[\"']([^\"']+)[\"']|([^\"'\s>]+))", tag, re.I)
+        if not href_match:
+            continue
+        href = href_match.group(1) or href_match.group(2) or ""
+        href = href.strip()
+        if not href or href.startswith("data:"):
+            continue
+        # Vector first (crisp at panel size), then the biggest raster.
+        rank = 0 if "svg" in rel or href.lower().endswith(".svg") else 1
+        size = 0
+        sizes_match = re.search(r"sizes\s*=\s*[\"']?([0-9]+)x", tag, re.I)
+        if sizes_match:
+            size = int(sizes_match.group(1))
+        if "apple-touch-icon" in rel:
+            size = max(size, 180)
+        found.append((rank, -size, urljoin(base, href)))
+
+    found.sort()
+    ordered: list[str] = []
+    for _, _, url in found:
+        if url not in ordered:
+            ordered.append(url)
+    return ordered
+
+
+def icon_attempts(feed: dict[str, Any], hint: str = "",
+                  deep: bool = False) -> tuple[list[str], list[str]]:
+    """Icon URLs in browser order: ``(declared, fallbacks)``.
+
+    ``declared`` are icons the feed or the site explicitly points at (Atom/RSS image, JSON Feed,
+    ``<link rel="icon">``); ``fallbacks`` are the ``/favicon.ico`` guesses. Keeping them apart lets
+    the repair pass upgrade to a declared icon without ever downgrading a good one to a guess.
+    """
     site = feed.get("site") or ""
     feed_url = feed.get("url") or ""
     origin = "{0.scheme}://{0.netloc}".format(urlparse(site or feed_url))
-    attempts: list[str] = []
+    page_url = site or (origin + "/")
+
+    declared: list[str] = []
     if hint:
-        attempts.append(hint)
-    if feed_url:
-        attempts.append(urljoin(feed_url, "/favicon.ico"))
-    if origin and origin + "/favicon.ico" not in attempts:
-        attempts.append(urljoin(origin, "/favicon.ico"))
-    for candidate in attempts:
+        declared.append(hint)
+    if deep:
+        # The stored "site" is often the feed document itself (…/feed/, /feed.xml), which carries
+        # no <link> tags. A browser reads the site's HTML page, so ask the home page as well and
+        # keep the first result that declares icons.
+        pages: list[str] = []
+        for candidate in (page_url, origin + "/" if origin else ""):
+            if candidate and candidate not in pages:
+                pages.append(candidate)
+        for candidate in pages:
+            try:
+                page = http_get(candidate, timeout=8)
+            except Exception:  # noqa: BLE001 - try the next candidate, fallbacks still apply
+                continue
+            found = _icon_links(page["body"].decode("utf-8", "replace"),
+                                page["url"] or candidate)
+            if found:
+                declared.extend(found)
+                break
+
+    # Well-known locations, in the order browsers used to probe them. Plenty of sites serve
+    # their icon only at one of these while /favicon.ico is missing or empty.
+    fallbacks: list[str] = []
+    for base in (feed_url, origin):
+        if not base:
+            continue
+        for name in ("/favicon.ico", "/favicon.png", "/apple-touch-icon.png"):
+            candidate = urljoin(base, name)
+            if candidate not in fallbacks:
+                fallbacks.append(candidate)
+
+    deduped: list[str] = []
+    for url in declared:
+        if url and url not in deduped:
+            deduped.append(url)
+    declared = deduped
+    fallbacks = [url for url in fallbacks if url not in declared]
+    return declared, fallbacks
+
+
+def try_icon_sources(store: Store, feed_id: int, urls: list[str],
+                     timeout: float = 6.0) -> str:
+    """Download the first icon that works and persist it; "" when none does."""
+    for candidate in urls:
         try:
-            uri = cache_image(candidate, timeout=5)
+            uri = cache_image(candidate, timeout=timeout)
         except Exception:  # noqa: BLE001
             uri = ""
         if uri:
-            store.update_feed(feed["id"], icon=uri)
+            store.update_feed(feed_id, icon=uri)
             return uri
-    if not deep:
-        return ""
-    # optional: <link rel="icon"> declared by the site
-    if origin:
-        try:
-            page = http_get(origin + "/", timeout=8)
-        except Exception:  # noqa: BLE001
-            return ""
-        html_text = page["body"].decode("utf-8", "replace")
-        for match in re.finditer(r"<link\b[^>]*>", html_text, re.I):
-            tag = match.group(0)
-            if not re.search(r"rel\s*=\s*[\"']?(?:shortcut )?icon", tag, re.I):
-                continue
-            href = re.search(r"href\s*=\s*[\"']([^\"']+)[\"']", tag, re.I)
-            if not href:
-                continue
-            uri = cache_image(urljoin(origin + "/", href.group(1)), timeout=5)
-            if uri:
-                store.update_feed(feed["id"], icon=uri)
-                return uri
     return ""
+
+
+def store_feed_icon(store: Store, feed: dict[str, Any], hint: str = "",
+                    deep: bool = False, force: bool = False) -> str:
+    """Cache a favicon for the feed and persist the file URI on the row.
+
+    Order follows the browser: an icon the feed itself declares (Atom/RSS image, JSON Feed icon),
+    then the icons the site's home page declares, then ``/favicon.ico``. ``deep=False`` keeps the
+    add-feed path cheap (hint + /favicon.ico); ``deep=True`` fetches the home page.
+    ``force=True`` re-discovers even when a file URI is already stored, which is what the icon
+    repair pass uses.
+    """
+    if feed.get("icon") and not force:
+        return feed["icon"]
+    declared, fallbacks = icon_attempts(feed, hint, deep)
+    uri = try_icon_sources(store, feed["id"], declared + fallbacks)
+    if not uri and force:
+        store.update_feed(feed["id"], icon="")
+    return uri
 
 # ---------------------------------------------------------------------- feeds
 def refresh_feed(store: Store, feed: dict[str, Any], max_items: int) -> dict[str, Any]:
