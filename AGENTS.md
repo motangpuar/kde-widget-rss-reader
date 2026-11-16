@@ -47,6 +47,10 @@ python3 -m knewsd --port 8770        # PYTHONPATH=backend
 CI logic must live in `scripts/`, never inline in a workflow `run:` block: heredocs there
 cannot be tested locally and one already broke CI once. `scripts/ci-local.sh` enforces that.
 
+Release notes come from `CHANGELOG.md`: add the section for the new version, and
+`scripts/release-notes.sh` turns it into the GitHub release body (the workflow falls back to
+generated notes when the section is missing).
+
 Release flow: bump `KPlugin.Version` in
 `plasmoid/io.github.infidel.newscurator/metadata.json` **and** `VERSION` in
 `backend/knewsd/config.py`, commit, `git tag -a vX.Y.Z`,

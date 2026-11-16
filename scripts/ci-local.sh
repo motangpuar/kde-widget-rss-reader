@@ -129,6 +129,17 @@ if not pathlib.Path("backend/knewsd/__main__.py").is_file():
 print("  unit valid: project URL, reaper off, runtime dir writable, runs -m knewsd")
 PY
 
+step "changelog"
+version=$(python3 scripts/check-metadata.py --print-version)
+if ! ./scripts/release-notes.sh "$version" > /tmp/knews-notes.$$ 2>/tmp/knews-notes.err; then
+    cat /tmp/knews-notes.err >&2
+    rm -f /tmp/knews-notes.$$ /tmp/knews-notes.err
+    printf 'error: CHANGELOG.md needs a section for %s\n' "$version" >&2
+    exit 1
+fi
+printf '  CHANGELOG.md section for %s: %s lines\n' "$version" "$(wc -l < /tmp/knews-notes.$$)"
+rm -f /tmp/knews-notes.$$ /tmp/knews-notes.err
+
 step "metadata"
 python3 scripts/check-metadata.py
 

@@ -158,6 +158,7 @@ destruction, and the idle exit covers the rest.
 
 | Document | Audience |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each release |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the backend lives, talks and fails |
 | [docs/API.md](docs/API.md) | HTTP API reference |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, test, CI, release |

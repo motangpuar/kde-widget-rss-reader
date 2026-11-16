@@ -1,7 +1,7 @@
 name: Release
 
 # Cut a release by pushing a version tag:
-#   git tag -a v1.9.0 -m "News Curator 1.9.0" && git push origin main --follow-tags
+#   git tag -a v1.10.0 -m "News Curator 1.10.0" && git push origin main --follow-tags
 # The workflow refuses to publish when the tag and metadata.json disagree, so the tagged commit
 # is always self-consistent. Products:
 #   io.github.infidel.newscurator-<version>.plasmoid  -> upload as-is to store.kde.org
@@ -47,15 +47,32 @@ jobs:
       - name: Build and verify artifacts
         run: ./scripts/ci-local.sh --skip-tests
 
+      - name: Collect release notes
+        run: |
+          version=$(python3 scripts/check-metadata.py --print-version)
+          if ./scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md" 2>"$RUNNER_TEMP/notes.err"; then
+            echo "NOTES_FILE=$RUNNER_TEMP/notes.md" >> "$GITHUB_ENV"
+            echo "release notes: CHANGELOG.md section for $version ($(wc -l < "$RUNNER_TEMP/notes.md") lines)"
+          else
+            echo "release notes: no CHANGELOG.md section, falling back to generated notes"
+            cat "$RUNNER_TEMP/notes.err" >&2
+          fi
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(python3 scripts/check-metadata.py --print-version)
+          notes=()
+          if [ -n "${NOTES_FILE:-}" ]; then
+            notes=(--notes-file "$NOTES_FILE")
+          else
+            notes=(--generate-notes)
+          fi
           gh release create "$RELEASE_TAG" \
             "dist/io.github.infidel.newscurator-$version.plasmoid" \
             "dist/news-curator-$version.tar.gz" \
             "dist/SHA256SUMS" \
             --title "News Curator $version" \
-            --generate-notes \
+            "${notes[@]}" \
             --verify-tag
